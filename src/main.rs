@@ -26,7 +26,10 @@ fn handle_stream(mut stream: TcpStream) {
     println!("accepted new connection");
 
     let mut buf = [0u8, 20];
-    while let Ok(_) = stream.read(&mut buf) {
+    while let Ok(n) = stream.read(&mut buf) {
+        if n == 0 {
+            break;
+        }
         stream.write(b"+PONG\r\n").unwrap();
     }
 }
