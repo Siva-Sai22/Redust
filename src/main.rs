@@ -2,6 +2,7 @@
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
+    thread,
 };
 
 fn main() {
@@ -13,7 +14,7 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(mut _stream) => {
-                handle_stream(_stream);
+                thread::spawn(|| handle_stream(_stream));
             }
             Err(e) => {
                 println!("error: {}", e);
