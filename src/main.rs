@@ -1,26 +1,36 @@
 use core::str;
+use std::collections::HashMap;
 use std::error::Error;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
+
+type Db = Arc<Mutex<HashMap<String, String>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     println!("Logs from your program will appear here!");
 
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let db: Db = Arc::new(Mutex::new(HashMap::new()));
 
     loop {
         let (socket, _) = listener.accept().await.unwrap();
-        tokio::spawn(async {
-            handle_stream(socket).await;
+        let db_clone = db.clone();
+        tokio::spawn(async move {
+            handle_stream(socket, db_clone).await;
         });
     }
 }
 
-async fn handle_stream(mut stream: TcpStream) {
+async fn handle_stream(mut stream: TcpStream, db: Db) {
     println!("accepted new connection");
 
     let mut buf = [0; 512];
+    let pong = "+PONG\r\n";
+    let ok = "+OK\r\n";
+    let null = "$-1\r\n";
 
     loop {
         let n = match stream.read(&mut buf).await {
@@ -31,15 +41,50 @@ async fn handle_stream(mut stream: TcpStream) {
             }
         };
 
-        if n != 0 {
-            let received = str::from_utf8(&buf[..n]).unwrap();
-            let parsed = parse_resp(received).unwrap();
-            if parsed.len() >= 2 && parsed[0] == "ECHO" {
-                let data = format!("${}\r\n{}\r\n", parsed[1].len(), parsed[1]);
-                stream.write(data.as_bytes()).await.unwrap();
-            } else {
-                let data = "+PONG\r\n";
-                stream.write(data.as_bytes()).await.unwrap();
+        if n == 0 {
+            continue;
+        }
+
+        let received = str::from_utf8(&buf[..n]).unwrap();
+        let parsed = parse_resp(received).unwrap();
+
+        match parsed[0].as_str() {
+            "ECHO" => {
+                if let Some(arg) = parsed.get(1) {
+                    let data = format!("${}\r\n{}\r\n", arg.len(), arg);
+                    stream.write_all(data.as_bytes()).await.unwrap();
+                } else {
+                    let err_msg = "-ERR wrong number of arguments for 'echo' command\r\n";
+                    stream.write_all(err_msg.as_bytes()).await.unwrap();
+                }
+            }
+            "PING" => {
+                stream.write_all(pong.as_bytes()).await.unwrap();
+            }
+            "SET" => {
+                if let (Some(key), Some(value)) = (parsed.get(1), parsed.get(2)) {
+                    let mut map = db.lock().await;
+                    map.insert(key.to_string(), value.to_string());
+                    stream.write_all(ok.as_bytes()).await.unwrap();
+                } else {
+                    let err_msg = "-ERR wrong number of arguments for 'set' command\r\n";
+                    stream.write_all(err_msg.as_bytes()).await.unwrap();
+                }
+            }
+            "GET" => {
+                if let Some(key) = parsed.get(1) {
+                    let map = db.lock().await;
+                    if let Some(value) = map.get(key) {
+                        let response = format!("${}\r\n{}\r\n", value.len(), value);
+                        stream.write_all(response.as_bytes()).await.unwrap();
+                    } else {
+                        stream.write_all(null.as_bytes()).await.unwrap();
+                    }
+                }
+            }
+            _ => {
+                let err_msg = "-ERR unknown command\r\n";
+                stream.write_all(err_msg.as_bytes()).await.unwrap();
             }
         }
     }
