@@ -2,11 +2,17 @@ use core::str;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-type Db = Arc<Mutex<HashMap<String, String>>>;
+struct ValueEntry {
+    value: String,
+    expires_at: Option<Instant>,
+}
+
+type Db = Arc<Mutex<HashMap<String, ValueEntry>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -63,8 +69,25 @@ async fn handle_stream(mut stream: TcpStream, db: Db) {
             }
             "SET" => {
                 if let (Some(key), Some(value)) = (parsed.get(1), parsed.get(2)) {
+                    let mut expires_at = None;
+
+                    if parsed.len() > 3 {
+                        if let (Some(option), Some(ms_str)) = (parsed.get(3), parsed.get(4)) {
+                            if option.to_uppercase() == "PX" {
+                                if let Ok(ms) = ms_str.parse::<u64>() {
+                                    expires_at = Some(Instant::now() + Duration::from_millis(ms));
+                                }
+                            }
+                        }
+                    }
+
+                    let entry = ValueEntry {
+                        value: value.to_string(),
+                        expires_at,
+                    };
+
                     let mut map = db.lock().await;
-                    map.insert(key.to_string(), value.to_string());
+                    map.insert(key.to_string(), entry);
                     stream.write_all(ok.as_bytes()).await.unwrap();
                 } else {
                     let err_msg = "-ERR wrong number of arguments for 'set' command\r\n";
@@ -73,13 +96,24 @@ async fn handle_stream(mut stream: TcpStream, db: Db) {
             }
             "GET" => {
                 if let Some(key) = parsed.get(1) {
-                    let map = db.lock().await;
-                    if let Some(value) = map.get(key) {
-                        let response = format!("${}\r\n{}\r\n", value.len(), value);
+                    let mut map = db.lock().await;
+                    if let Some(entry) = map.get(key) {
+                        if let Some(expiry) = entry.expires_at {
+                            if Instant::now() > expiry {
+                                map.remove(key);
+                                stream.write_all(null.as_bytes()).await.unwrap();
+                                continue;
+                            }
+                        }
+
+                        let response = format!("${}\r\n{}\r\n", entry.value.len(), entry.value);
                         stream.write_all(response.as_bytes()).await.unwrap();
                     } else {
                         stream.write_all(null.as_bytes()).await.unwrap();
                     }
+                } else {
+                    let err_msg = "-ERR wrong number of arguments for 'get' command\r\n";
+                    stream.write_all(err_msg.as_bytes()).await.unwrap();
                 }
             }
             _ => {
