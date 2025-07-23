@@ -84,7 +84,7 @@ pub async fn handle_command(
             }
         }
         "RPUSH" => {
-            if let (Some(key), Some(value)) = (args.get(0), args.get(1)) {
+            if let Some(key) = args.get(0) {
                 let mut map = db.lock().await;
                 let entry = map.entry(key.to_string()).or_insert(ValueEntry {
                     value: DataStoreValue::List(Vec::new()),
@@ -92,7 +92,9 @@ pub async fn handle_command(
                 });
                 match &mut entry.value {
                     DataStoreValue::List(val) => {
-                        val.push(value.to_string());
+                        for i in 0..(args.len()-1) {
+                            val.push(args.get(i+1).unwrap().to_string());
+                        }
                         let response = format!(":{}\r\n", val.len());
                         stream.write_all(response.as_bytes()).await?;
                     }
