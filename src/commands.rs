@@ -1,4 +1,6 @@
 use crate::storage::{DataStoreValue, Db, ValueEntry};
+use std::cmp::min;
+use std::fmt::Write;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -14,6 +16,7 @@ pub async fn handle_command(
 
     let ok = "+OK\r\n";
     let null = "$-1\r\n";
+    let empty_arr = "*0\r\n";
     let type_err = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
 
     match command.as_str() {
@@ -92,8 +95,8 @@ pub async fn handle_command(
                 });
                 match &mut entry.value {
                     DataStoreValue::List(val) => {
-                        for i in 0..(args.len()-1) {
-                            val.push(args.get(i+1).unwrap().to_string());
+                        for i in 0..(args.len() - 1) {
+                            val.push(args.get(i + 1).unwrap().to_string());
                         }
                         let response = format!(":{}\r\n", val.len());
                         stream.write_all(response.as_bytes()).await?;
@@ -106,6 +109,66 @@ pub async fn handle_command(
             } else {
                 stream
                     .write_all(b"-ERR wrong number of arguments for 'rpush' command\r\n")
+                    .await?;
+            }
+        }
+        "LRANGE" => {
+            if let (Some(key), Some(start_ind), Some(end_ind)) =
+                (args.get(0), args.get(1), args.get(2))
+            {
+                let map = db.lock().await;
+                if let Some(entry) = map.get(key) {
+                    match &entry.value {
+                        DataStoreValue::List(val) => {
+                            let start = match start_ind.parse::<usize>() {
+                                Ok(s) => s,
+                                Err(_) => {
+                                    stream
+                                        .write_all(
+                                            b"-ERR value is not an integer or out of range\r\n",
+                                        )
+                                        .await?;
+                                    return Ok(());
+                                }
+                            };
+
+                            let mut end = match end_ind.parse::<usize>() {
+                                Ok(e) => e,
+                                Err(_) => {
+                                    stream
+                                        .write_all(
+                                            b"-ERR value is not an integer or out of range\r\n",
+                                        )
+                                        .await?;
+                                    return Ok(());
+                                }
+                            };
+                            
+                            end = min(end, val.len()-1);
+                            if start > end || start >= val.len() {
+                                stream.write_all(empty_arr.as_bytes()).await?;
+                                return Ok(());
+                            }
+
+                            let mut response = format!("*{}\r\n", end - start + 1);
+                            for i in start..=end {
+                                write!(&mut response, "${}\r\n", val[i as usize].len()).unwrap();
+                                write!(&mut response, "{}\r\n", val[i as usize]).unwrap();
+                            }
+
+                            stream.write_all(response.as_bytes()).await?;
+                        }
+
+                        _ => {
+                            stream.write_all(null.as_bytes()).await?;
+                        }
+                    }
+                } else {
+                    stream.write_all(empty_arr.as_bytes()).await?;
+                }
+            } else {
+                stream
+                    .write_all(b"-ERR wrong number of arguments for 'lrange' command\r\n")
                     .await?;
             }
         }
