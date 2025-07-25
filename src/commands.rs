@@ -233,6 +233,39 @@ pub async fn handle_command(
                     .await?;
             }
         }
+        "LPOP" => {
+            if let Some(key) = args.get(0) {
+                let mut map = db.lock().await;
+                if let Some(entry) = map.get_mut(key) {
+                    match &mut entry.value {
+                        DataStoreValue::List(val) => {
+                            if let Some(num_of_ele) = args.get(1) {
+                                let num_of_ele = num_of_ele.parse::<u32>().unwrap();
+                                let mut response = format!("*{}\r\n", num_of_ele);
+                                for _ in 0..num_of_ele {
+                                    let ele = val.remove(0);
+                                    write!(&mut response, "${}\r\n{}\r\n", ele.len(), ele).unwrap();
+                                }
+                                stream.write_all(response.as_bytes()).await?;
+                            } else {
+                                let ele = val.remove(0);
+                                let response = format!("${}\r\n{}\r\n", ele.len(), ele);
+                                stream.write_all(response.as_bytes()).await?;
+                            }
+                        }
+                        _ => {
+                            stream.write_all(type_err.as_bytes()).await?;
+                        }
+                    }
+                } else {
+                    stream.write_all(null.as_bytes()).await?;
+                }
+            } else {
+                stream
+                    .write_all(b"-ERR wrong number of arguments for 'lpop' command\r\n")
+                    .await?;
+            }
+        }
         _ => {
             let err_msg = format!(
                 "-ERR unknown command `{}`, with args beginning with: {:?}\r\n",
