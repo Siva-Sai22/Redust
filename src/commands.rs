@@ -1,5 +1,5 @@
 use crate::storage::{DataStoreValue, Db, ValueEntry};
-use std::cmp::min;
+use std::cmp::{max, min};
 use std::fmt::Write;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
@@ -120,7 +120,7 @@ pub async fn handle_command(
                 if let Some(entry) = map.get(key) {
                     match &entry.value {
                         DataStoreValue::List(val) => {
-                            let start = match start_ind.parse::<usize>() {
+                            let mut start = match start_ind.parse::<i32>() {
                                 Ok(s) => s,
                                 Err(_) => {
                                     stream
@@ -132,7 +132,7 @@ pub async fn handle_command(
                                 }
                             };
 
-                            let mut end = match end_ind.parse::<usize>() {
+                            let mut end = match end_ind.parse::<i32>() {
                                 Ok(e) => e,
                                 Err(_) => {
                                     stream
@@ -143,9 +143,21 @@ pub async fn handle_command(
                                     return Ok(());
                                 }
                             };
-                            
-                            end = min(end, val.len()-1);
-                            if start > end || start >= val.len() {
+
+                            let n = val.len() as i32;
+
+                            if start < 0 {
+                                start = n + start;
+                                start = max(start, 0);
+                            }
+
+                            if end < 0 {
+                                end = n + end;
+                                start = max(start, 0);
+                            }
+
+                            end = min(end, n - 1);
+                            if start > end || start >= n {
                                 stream.write_all(empty_arr.as_bytes()).await?;
                                 return Ok(());
                             }
