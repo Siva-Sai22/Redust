@@ -210,6 +210,29 @@ pub async fn handle_command(
                     .await?;
             }
         }
+        "LLEN" => {
+            if let Some(key) = args.get(0) {
+                let map = db.lock().await;
+                if let Some(entry) = map.get(key) {
+                    match &entry.value {
+                        DataStoreValue::List(val) => {
+                            let response = format!(":{}\r\n", val.len());
+                            stream.write_all(response.as_bytes()).await?;
+                        }
+
+                        _ => {
+                            stream.write_all(b":0\r\n").await?;
+                        }
+                    }
+                } else {
+                    stream.write_all(b":0\r\n").await?;
+                }
+            } else {
+                stream
+                    .write_all(b"-ERR wrong number of arguments for 'llen' command\r\n")
+                    .await?;
+            }
+        }
         _ => {
             let err_msg = format!(
                 "-ERR unknown command `{}`, with args beginning with: {:?}\r\n",
