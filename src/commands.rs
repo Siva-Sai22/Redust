@@ -278,7 +278,7 @@ pub async fn handle_command(
                 return Ok(());
             }
 
-            let timeout_secs = match args.last().unwrap().parse::<u64>() {
+            let timeout_secs = match args.last().unwrap().parse::<f32>() {
                 Ok(t) => t,
                 Err(_) => {
                     stream
@@ -325,10 +325,10 @@ pub async fn handle_command(
                 }
 
                 // --- Step 3: Wait for the signal (or timeout) ---
-                let wait_result = if timeout_secs == 0 {
+                let wait_result = if timeout_secs == 0.0 {
                     rx.await.map_err(|_| "channel closed")
                 } else {
-                    match timeout(Duration::from_secs(timeout_secs), rx).await {
+                    match timeout(Duration::from_secs_f32(timeout_secs), rx).await {
                         Ok(Ok(_)) => Ok(()),                 // Signal received
                         Ok(Err(_)) => Err("channel closed"), // Sender was dropped
                         Err(_) => Err("timeout"),            // Timeout elapsed
