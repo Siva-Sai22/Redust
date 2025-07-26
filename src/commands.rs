@@ -1,6 +1,7 @@
-use crate::storage::{BlockedClients, BlockedSender, DataStoreValue, Db, ValueEntry};
+use crate::storage::{BlockedClients, BlockedSender, DataStoreValue, Db, StreamEntry, ValueEntry};
 use nanoid::nanoid;
 use std::cmp::{max, min};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
@@ -391,9 +392,49 @@ pub async fn handle_command(
                     DataStoreValue::String(_) => {
                         stream.write_all(b"+string\r\n").await?;
                     }
+
+                    DataStoreValue::Stream(_) => {
+                        stream.write_all(b"+stream\r\n").await?;
+                    }
                 }
             } else {
                 stream.write_all(b"+none\r\n").await?;
+            }
+        }
+        "XADD" => {
+            if args.len() < 2 {
+                stream
+                    .write_all(b"-ERR wrong number of arguments for 'stream' command\r\n")
+                    .await?;
+            }
+            let key = args[0].to_string();
+            let id = args[1].to_string();
+            let mut map = db.lock().await;
+            let entry = map.entry(key.to_string()).or_insert(ValueEntry {
+                value: DataStoreValue::Stream(BTreeMap::new()),
+                expires_at: None,
+            });
+
+            if let DataStoreValue::Stream(btreemap) = &mut entry.value {
+                let mut fields = HashMap::new();
+                for i in (2..args.len()).step_by(2) {
+                    if i + 1 < args.len() {
+                        fields.insert(args[i].to_string(), args[i + 1].to_string());
+                    } else {
+                        stream
+                            .write_all(b"-ERR wrong number of arguments for 'xadd' command\r\n")
+                            .await?;
+                        return Ok(());
+                    }
+                }
+                let stream_entry = StreamEntry {
+                    id: id.clone(),
+                    fields,
+                };
+                btreemap.insert(key, stream_entry);
+
+                let response = format!("${}\r\n{}\r\n", id.len(), id);
+                stream.write_all(response.as_bytes()).await?;
             }
         }
         _ => {

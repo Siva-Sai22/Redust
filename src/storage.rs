@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, oneshot};
@@ -6,6 +6,7 @@ use tokio::sync::{Mutex, oneshot};
 pub enum DataStoreValue {
     String(String),
     List(Vec<String>),
+    Stream(BTreeMap<String, StreamEntry>)
 }
 
 pub struct BlockedSender {
@@ -16,6 +17,11 @@ pub struct BlockedSender {
 pub struct ValueEntry {
     pub value: DataStoreValue,
     pub expires_at: Option<Instant>,
+}
+
+pub struct StreamEntry {
+    pub id: String,
+    pub fields: HashMap<String, String>
 }
 
 pub type Db = Arc<Mutex<HashMap<String, ValueEntry>>>;
