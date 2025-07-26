@@ -374,6 +374,28 @@ pub async fn handle_command(
                 }
             }
         }
+        "TYPE" => {
+            if args.len() != 1 {
+                stream
+                    .write_all(b"-ERR wrong number of arguments for 'type' command\r\n")
+                    .await?;
+            }
+
+            let map = db.lock().await;
+            if let Some(entry) = map.get(&args[0]) {
+                match &entry.value {
+                    DataStoreValue::List(_) => {
+                        stream.write_all(b"+list\r\n").await?;
+                    }
+
+                    DataStoreValue::String(_) => {
+                        stream.write_all(b"+string\r\n").await?;
+                    }
+                }
+            } else {
+                stream.write_all(b"+none\r\n").await?;
+            }
+        }
         _ => {
             let err_msg = format!(
                 "-ERR unknown command `{}`, with args beginning with: {:?}\r\n",
