@@ -6,7 +6,7 @@ use tokio::sync::{Mutex, oneshot};
 pub enum DataStoreValue {
     String(String),
     List(Vec<String>),
-    Stream(BTreeMap<String, StreamEntry>)
+    Stream(Stream)
 }
 
 pub struct BlockedSender {
@@ -22,6 +22,11 @@ pub struct ValueEntry {
 pub struct StreamEntry {
     pub id: String,
     pub fields: HashMap<String, String>
+}
+
+pub struct Stream {
+    pub entries: BTreeMap<String, StreamEntry>,
+    pub last_id: String,
 }
 
 pub type Db = Arc<Mutex<HashMap<String, ValueEntry>>>;
