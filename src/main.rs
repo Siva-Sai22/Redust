@@ -3,7 +3,7 @@ use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::storage::Db;
+use crate::storage::{BlockedClients, Db};
 
 // Declare the modules to make them available
 mod commands;
@@ -17,9 +17,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Initialize the shared database
     let db: Db = Arc::new(Mutex::new(HashMap::new()));
+    let blocked_clients: BlockedClients = Arc::new(Mutex::new(HashMap::new()));
     
     // Start the server
-    if let Err(e) = server::run(db).await {
+    if let Err(e) = server::run(db, blocked_clients).await {
         eprintln!("Server error: {}", e);
     }
     
