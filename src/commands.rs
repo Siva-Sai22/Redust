@@ -3,7 +3,7 @@ use nanoid::nanoid;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
@@ -436,23 +436,46 @@ pub async fn handle_command(
                     .split('-')
                     .map(|s| s.to_string())
                     .collect::<Vec<String>>();
+                let last_timestamp = last_id[0].parse::<u128>().unwrap_or(0);
                 let last_seq = last_id[1].parse::<u64>().unwrap_or(0);
-                let last_timestamp = last_id[0].parse::<u64>().unwrap_or(0);
 
-                let cur_id = id
-                    .split('-')
-                    .map(|s| s.to_string())
-                    .collect::<Vec<String>>();
-                let cur_seq = if cur_id[1] == "*" {
-                    if cur_id[0] == last_id[0] {
-                        last_seq + 1
-                    } else {
-                        0
-                    }
+                let cur_timestamp: u128;
+                let cur_seq: u64;
+
+                println!("ID: {}", id);
+
+                if id == "*" {
+                    cur_seq = 0;
+                    cur_timestamp = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis();
                 } else {
-                    cur_id[1].parse::<u64>().unwrap_or(0)
-                };
-                let cur_timestamp = cur_id[0].parse::<u64>().unwrap_or(0);
+                    let cur_id = id
+                        .split('-')
+                        .map(|s| s.to_string())
+                        .collect::<Vec<String>>();
+
+                    if cur_id.len() != 2 {
+                        stream
+                            .write_all(
+                                b"-ERR Invalid stream ID specified as stream command argument\r\n",
+                            )
+                            .await?;
+                        return Ok(());
+                    }
+
+                    cur_seq = if cur_id[1] == "*" {
+                        if cur_id[0] == last_id[0] {
+                            last_seq + 1
+                        } else {
+                            0
+                        }
+                    } else {
+                        cur_id[1].parse::<u64>().unwrap_or(0)
+                    };
+                    cur_timestamp = cur_id[0].parse::<u128>().unwrap_or(0);
+                }
 
                 if cur_seq == 0 && cur_timestamp == 0 {
                     stream
