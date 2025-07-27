@@ -544,6 +544,36 @@ pub async fn handle_command(
                 stream.write_all(null.as_bytes()).await?;
             }
         }
+        "XREAD" => {
+            let id = args.last().unwrap().to_string();
+            let mut response = String::new();
+            response.push_str(&format!("*{}\r\n", args.len() - 2));
+            let map = db.lock().await;
+            for key in &args[1..=(args.len() - 2)] {
+                response.push_str("*2\r\n");
+                response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
+                if let Some(entry) = map.get(key) {
+                    if let DataStoreValue::Stream(bitreemap) = &entry.value {
+                        let range = bitreemap.entries.range(id.clone()..);
+                        response.push_str(&format!("*{}\r\n", range.clone().count()));
+
+                        for (id, fields) in range {
+                            response.push_str("*2\r\n");
+                            response.push_str(&format!("${}\r\n{}\r\n", id.len(), id));
+                            response.push_str(&format!("*{}\r\n", fields.len()*2));
+                            for (key, value) in fields {
+                                response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
+                                response.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
+                            }
+                        }
+                    } else {
+                        stream.write_all(type_err.as_bytes()).await?;
+                    }
+                }
+            }
+
+            stream.write_all(response.as_bytes()).await?;
+        }
         _ => {
             let err_msg = format!(
                 "-ERR unknown command `{}`, with args beginning with: {:?}\r\n",
