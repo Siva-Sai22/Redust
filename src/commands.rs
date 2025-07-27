@@ -500,6 +500,48 @@ pub async fn handle_command(
                 stream.write_all(response.as_bytes()).await?;
             }
         }
+        "XRANGE" => {
+            if args.len() < 3 {
+                stream
+                    .write_all(b"-ERR wrong number of arguments for 'xrange' command\r\n")
+                    .await?;
+                return Ok(());
+            }
+
+            let key = args[0].to_string();
+            let mut start = args[1].to_string();
+            let mut end = args[2].to_string();
+
+            if !start.contains("-") {
+                start = format!("{}-0", start);
+            }
+            if !end.contains("-") {
+                end = format!("{}-0", end);
+            }
+
+            let map = db.lock().await;
+            if let Some(entry) = map.get(&key) {
+                if let DataStoreValue::Stream(btreemap) = &entry.value {
+                    let mut response = String::new();
+                    let range = btreemap.entries.range(start..=end);
+                    response.push_str(&format!("*{}\r\n", range.clone().count()));
+                    for (id, fields) in range {
+                        response.push_str("*2\r\n");
+                        response.push_str(&format!("${}\r\n{}\r\n", id.len(), id));
+                        response.push_str(&format!("*{}\r\n", fields.len()*2));
+                        for (field, value) in fields {
+                            response.push_str(&format!("${}\r\n{}\r\n", field.len(), field));
+                            response.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
+                        }
+                    }
+                    stream.write_all(response.as_bytes()).await?;
+                } else {
+                    stream.write_all(type_err.as_bytes()).await?;
+                }
+            } else {
+                stream.write_all(null.as_bytes()).await?;
+            }
+        }
         _ => {
             let err_msg = format!(
                 "-ERR unknown command `{}`, with args beginning with: {:?}\r\n",
