@@ -1,6 +1,4 @@
-use crate::storage::{
-    BlockedClients, BlockedSender, DataStoreValue, Db, Stream, StreamEntry, ValueEntry,
-};
+use crate::storage::{BlockedClients, BlockedSender, DataStoreValue, Db, Stream, ValueEntry};
 use nanoid::nanoid;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
@@ -441,31 +439,41 @@ pub async fn handle_command(
                 let last_seq = last_id[1].parse::<u64>().unwrap_or(0);
                 let last_timestamp = last_id[0].parse::<u64>().unwrap_or(0);
 
-                let cur_id = id.split('-')
+                let cur_id = id
+                    .split('-')
                     .map(|s| s.to_string())
                     .collect::<Vec<String>>();
-                let cur_seq = cur_id[1].parse::<u64>().unwrap_or(0);
+                let cur_seq = if cur_id[1] == "*" {
+                    if cur_id[0] == last_id[0] {
+                        last_seq + 1
+                    } else {
+                        0
+                    }
+                } else {
+                    cur_id[1].parse::<u64>().unwrap_or(0)
+                };
                 let cur_timestamp = cur_id[0].parse::<u64>().unwrap_or(0);
 
                 if cur_seq == 0 && cur_timestamp == 0 {
-                    stream.write_all(b"-ERR The ID specified in XADD must be greater than 0-0\r\n").await?;
+                    stream
+                        .write_all(b"-ERR The ID specified in XADD must be greater than 0-0\r\n")
+                        .await?;
                     return Ok(());
                 }
 
-                if cur_timestamp < last_timestamp || (cur_timestamp == last_timestamp && cur_seq <= last_seq) {
+                if cur_timestamp < last_timestamp
+                    || (cur_timestamp == last_timestamp && cur_seq <= last_seq)
+                {
                     stream.write_all(b"-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n").await?;
                     return Ok(());
                 }
 
-                let stream_entry = StreamEntry {
-                    id: id.clone(),
-                    fields,
-                };
+                let calc_id = format!("{}-{}", cur_timestamp, cur_seq);
 
-                btreemap.entries.insert(id.clone(), stream_entry);
-                btreemap.last_id = id.clone();
+                btreemap.entries.insert(calc_id.clone(), fields);
+                btreemap.last_id = calc_id.clone();
 
-                let response = format!("${}\r\n{}\r\n", id.len(), id);
+                let response = format!("${}\r\n{}\r\n", calc_id.len(), calc_id);
                 stream.write_all(response.as_bytes()).await?;
             }
         }

@@ -19,13 +19,8 @@ pub struct ValueEntry {
     pub expires_at: Option<Instant>,
 }
 
-pub struct StreamEntry {
-    pub id: String,
-    pub fields: HashMap<String, String>
-}
-
 pub struct Stream {
-    pub entries: BTreeMap<String, StreamEntry>,
+    pub entries: BTreeMap<String, HashMap<String, String>>,
     pub last_id: String,
 }
 
