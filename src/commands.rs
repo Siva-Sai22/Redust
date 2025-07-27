@@ -442,8 +442,6 @@ pub async fn handle_command(
                 let cur_timestamp: u128;
                 let cur_seq: u64;
 
-                println!("ID: {}", id);
-
                 if id == "*" {
                     cur_seq = 0;
                     cur_timestamp = SystemTime::now()
@@ -515,7 +513,7 @@ pub async fn handle_command(
             if !start.contains("-") {
                 start = format!("{}-0", start);
             }
-            if !end.contains("-") {
+            if !end.contains("-") && end != "+" {
                 end = format!("{}-0", end);
             }
 
@@ -523,12 +521,16 @@ pub async fn handle_command(
             if let Some(entry) = map.get(&key) {
                 if let DataStoreValue::Stream(btreemap) = &entry.value {
                     let mut response = String::new();
-                    let range = btreemap.entries.range(start..=end);
+                    let range = if end == "+" {
+                        btreemap.entries.range(start..)
+                    } else {
+                        btreemap.entries.range(start..=end)
+                    };
                     response.push_str(&format!("*{}\r\n", range.clone().count()));
                     for (id, fields) in range {
                         response.push_str("*2\r\n");
                         response.push_str(&format!("${}\r\n{}\r\n", id.len(), id));
-                        response.push_str(&format!("*{}\r\n", fields.len()*2));
+                        response.push_str(&format!("*{}\r\n", fields.len() * 2));
                         for (field, value) in fields {
                             response.push_str(&format!("${}\r\n{}\r\n", field.len(), field));
                             response.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
