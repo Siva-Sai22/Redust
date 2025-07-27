@@ -3,11 +3,12 @@ use nanoid::nanoid;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
+use std::ops::Bound::{Excluded, Unbounded};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 // Central function to process commands.
 pub async fn handle_command(
@@ -545,36 +546,80 @@ pub async fn handle_command(
             }
         }
         "XREAD" => {
-            let no_of_keys = (args.len() - 1) / 2;
-            let mut response = String::new();
-            response.push_str(&format!("*{}\r\n", no_of_keys));
-            let map = db.lock().await;
-            for i in 0..no_of_keys {
-                let key = args[i + 1].to_string();
-                let id = args[args.len() - 1].to_string();
-                response.push_str("*2\r\n");
-                response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
-                if let Some(entry) = map.get(&key) {
-                    if let DataStoreValue::Stream(bitreemap) = &entry.value {
-                        let range = bitreemap.entries.range(id.clone()..);
-                        response.push_str(&format!("*{}\r\n", range.clone().count()));
+            let (no_of_keys, start, timeout_ms) = if args[0] == "block" {
+                let timeout_ms = args[1].parse().unwrap_or(0);
+                ((args.len() - 3) / 2, 3, timeout_ms)
+            } else {
+                ((args.len() - 1) / 2, 1, 0)
+            };
 
-                        for (id, fields) in range {
-                            response.push_str("*2\r\n");
-                            response.push_str(&format!("${}\r\n{}\r\n", id.len(), id));
-                            response.push_str(&format!("*{}\r\n", fields.len() * 2));
-                            for (key, value) in fields {
-                                response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
-                                response.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
-                            }
+            if timeout_ms != 0 {
+                sleep(Duration::from_millis(timeout_ms)).await;
+            }
+
+            let mut results: Vec<(String, Vec<(String, HashMap<String, String>)>)> = Vec::new();
+            let db_map = db.lock().await;
+
+            // PASS 1: Collect results from all streams that have new data.
+            for i in 0..no_of_keys {
+                let key = &args[i + start];
+                let id = &args[args.len() - no_of_keys + i];
+
+                if let Some(entry) = db_map.get(key) {
+                    if let DataStoreValue::Stream(b_tree_map) = &entry.value {
+                        // Collect entries with an ID > the specified id.
+                        let entries: Vec<_> = b_tree_map
+                            .entries
+                            .range((Excluded(id.to_string()), Unbounded))
+                            .map(|(entry_id, fields)| (entry_id.clone(), fields.clone()))
+                            .collect();
+
+                        // Only add to results if there are new entries.
+                        if !entries.is_empty() {
+                            results.push((key.to_string(), entries));
                         }
-                    } else {
-                        stream.write_all(type_err.as_bytes()).await?;
                     }
                 }
             }
 
-            stream.write_all(response.as_bytes()).await?;
+            // Drop the lock as soon as we're done reading from the database.
+            drop(db_map);
+
+            // PASS 2: Format the response based on what was collected.
+            if results.is_empty() {
+                // If no stream had any new entries, send the null bulk string.
+                stream.write_all(null.as_bytes()).await?;
+            } else {
+                // If we have results, format them correctly.
+                let mut response = String::new();
+                response.push_str(&format!("*{}\r\n", results.len()));
+
+                for (key, entries) in results {
+                    // Start the response for this specific stream: an array of [key, entries]
+                    response.push_str("*2\r\n");
+                    response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
+                    response.push_str(&format!("*{}\r\n", entries.len()));
+
+                    for (entry_id, fields) in entries {
+                        response.push_str("*2\r\n");
+                        response.push_str(&format!("${}\r\n{}\r\n", entry_id.len(), entry_id));
+                        response.push_str(&format!("*{}\r\n", fields.len() * 2));
+                        for (field_key, field_value) in fields {
+                            response.push_str(&format!(
+                                "${}\r\n{}\r\n",
+                                field_key.len(),
+                                field_key
+                            ));
+                            response.push_str(&format!(
+                                "${}\r\n{}\r\n",
+                                field_value.len(),
+                                field_value
+                            ));
+                        }
+                    }
+                }
+                stream.write_all(response.as_bytes()).await?;
+            }
         }
         _ => {
             let err_msg = format!(
