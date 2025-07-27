@@ -545,14 +545,16 @@ pub async fn handle_command(
             }
         }
         "XREAD" => {
-            let id = args.last().unwrap().to_string();
+            let no_of_keys = (args.len() - 1) / 2;
             let mut response = String::new();
-            response.push_str(&format!("*{}\r\n", args.len() - 2));
+            response.push_str(&format!("*{}\r\n", no_of_keys));
             let map = db.lock().await;
-            for key in &args[1..=(args.len() - 2)] {
+            for i in 0..no_of_keys {
+                let key = args[i + 1].to_string();
+                let id = args[args.len() - 1].to_string();
                 response.push_str("*2\r\n");
                 response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
-                if let Some(entry) = map.get(key) {
+                if let Some(entry) = map.get(&key) {
                     if let DataStoreValue::Stream(bitreemap) = &entry.value {
                         let range = bitreemap.entries.range(id.clone()..);
                         response.push_str(&format!("*{}\r\n", range.clone().count()));
@@ -560,7 +562,7 @@ pub async fn handle_command(
                         for (id, fields) in range {
                             response.push_str("*2\r\n");
                             response.push_str(&format!("${}\r\n{}\r\n", id.len(), id));
-                            response.push_str(&format!("*{}\r\n", fields.len()*2));
+                            response.push_str(&format!("*{}\r\n", fields.len() * 2));
                             for (key, value) in fields {
                                 response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
                                 response.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
