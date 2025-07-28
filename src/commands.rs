@@ -611,7 +611,8 @@ pub async fn handle_command(
             }
 
             // 1. Fast Path: Check for data immediately.
-            let mut final_results = check_for_data(&state.db, &mod_args, no_of_keys, start_idx).await;
+            let mut final_results =
+                check_for_data(&state.db, &mod_args, no_of_keys, start_idx).await;
 
             // 2. Blocking Path: If no data and BLOCK was specified.
             if final_results.is_none() && is_blocking {
@@ -673,6 +674,43 @@ pub async fn handle_command(
             } else {
                 // No results found (either non-blocking or timed out).
                 stream.write_all(null.as_bytes()).await?;
+            }
+        }
+        "INCR" => {
+            if let Some(key) = args.get(0) {
+                let mut map = state.db.lock().await;
+                if let Some(entry) = map.get_mut(key) {
+                    match &mut entry.value {
+                        DataStoreValue::String(val) => {
+                            let prev = match val.parse::<i64>() {
+                                Ok(t) => t,
+                                _ => {
+                                    stream.write_all(type_err.as_bytes()).await?;
+                                    return Ok(());
+                                }
+                            };
+                            *val = (prev + 1).to_string();
+                            stream.write_all(format!(":{}\r\n", val).as_bytes()).await?;
+                        }
+
+                        _ => {
+                            stream.write_all(b"-ERR value is not an integer or out of range").await?;
+                        }
+                    }
+                } else {
+                    map.insert(
+                        key.to_string(),
+                        ValueEntry {
+                            value: DataStoreValue::String("1".to_string()),
+                            expires_at: None,
+                        },
+                    );
+                    stream.write_all(":1\r\n".as_bytes()).await?;
+                }
+            } else {
+                stream
+                    .write_all(b"-ERR wrong number of arguments for 'incr' command\r\n")
+                    .await?;
             }
         }
         _ => {
