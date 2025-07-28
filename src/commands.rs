@@ -685,16 +685,22 @@ pub async fn handle_command(
                             let prev = match val.parse::<i64>() {
                                 Ok(t) => t,
                                 _ => {
-                                    stream.write_all(type_err.as_bytes()).await?;
+                                    stream
+                                        .write_all(
+                                            b"-ERR value is not an integer or out of range\r\n",
+                                        )
+                                        .await?;
                                     return Ok(());
                                 }
                             };
                             *val = (prev + 1).to_string();
                             stream.write_all(format!(":{}\r\n", val).as_bytes()).await?;
                         }
-
                         _ => {
-                            stream.write_all(b"-ERR value is not an integer or out of range").await?;
+                            stream
+                                .write_all(b"-ERR value is not an integer or out of range\r\n")
+                                .await?;
+                            return Ok(());
                         }
                     }
                 } else {
