@@ -568,7 +568,7 @@ pub async fn handle_command(
 
                 for i in 0..no_of_keys {
                     let key = &args[i + start_idx];
-                    let id = &args[args.len() - no_of_keys + i];
+                    let id = args[args.len() - no_of_keys + i].to_string();
 
                     if let Some(entry) = db_map.get(key) {
                         if let DataStoreValue::Stream(stream_data) = &entry.value {
@@ -592,8 +592,26 @@ pub async fn handle_command(
                 }
             }
 
+            let mut mod_args = Vec::<String>::new();
+            for i in 0..args.len() {
+                mod_args.push(args[i].to_string());
+            }
+            for i in 0..no_of_keys {
+                let key = args[i + start_idx].to_string();
+                let mut id = args[args.len() - no_of_keys + i].to_string();
+                let db_map = state.db.lock().await;
+                if let Some(entry) = db_map.get(&key) {
+                    if let DataStoreValue::Stream(stream_data) = &entry.value {
+                        if id == "$" {
+                            id = stream_data.last_id.to_string();
+                        }
+                    }
+                }
+                mod_args[args.len() - no_of_keys + i] = id;
+            }
+
             // 1. Fast Path: Check for data immediately.
-            let mut final_results = check_for_data(&state.db, args, no_of_keys, start_idx).await;
+            let mut final_results = check_for_data(&state.db, &mod_args, no_of_keys, start_idx).await;
 
             // 2. Blocking Path: If no data and BLOCK was specified.
             if final_results.is_none() && is_blocking {
@@ -604,7 +622,7 @@ pub async fn handle_command(
                     if let Ok(Ok(_)) = timeout(Duration::from_millis(timeout_ms), rx.recv()).await {
                         // Woken by a notification, check again.
                         final_results =
-                            check_for_data(&state.db, args, no_of_keys, start_idx).await;
+                            check_for_data(&state.db, &mod_args, no_of_keys, start_idx).await;
                     }
                 } else {
                     // Indefinite block (timeout is 0)
@@ -612,7 +630,7 @@ pub async fn handle_command(
                         if rx.recv().await.is_ok() {
                             // Woken by a notification, check for data.
                             final_results =
-                                check_for_data(&state.db, args, no_of_keys, start_idx).await;
+                                check_for_data(&state.db, &mod_args, no_of_keys, start_idx).await;
                             if final_results.is_some() {
                                 // Data found for our keys, break the wait loop.
                                 break;
