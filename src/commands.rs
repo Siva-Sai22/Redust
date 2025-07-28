@@ -1,21 +1,21 @@
-use crate::storage::{BlockedClients, BlockedSender, DataStoreValue, Db, Stream, ValueEntry};
+use crate::storage::{AppState, BlockedSender, DataStoreValue, Db, Stream, ValueEntry};
 use nanoid::nanoid;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 use std::ops::Bound::{Excluded, Unbounded};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
-use tokio::time::{sleep, timeout};
+use tokio::time::timeout;
 
 // Central function to process commands.
 pub async fn handle_command(
     parsed: Vec<String>,
-    db: &Db,
     stream: &mut TcpStream,
-    blocked_clients: &BlockedClients,
+    state: &Arc<AppState>,
 ) -> std::io::Result<()> {
     let command = parsed.get(0).unwrap().to_uppercase();
     let args = &parsed[1..];
@@ -49,7 +49,7 @@ pub async fn handle_command(
                         }
                     }
                 }
-                let mut map = db.lock().await;
+                let mut map = state.db.lock().await;
                 let entry = ValueEntry {
                     value: DataStoreValue::String(value.to_string()),
                     expires_at,
@@ -64,7 +64,7 @@ pub async fn handle_command(
         }
         "GET" => {
             if let Some(key) = args.get(0) {
-                let mut map = db.lock().await;
+                let mut map = state.db.lock().await;
                 if let Some(entry) = map.get(key) {
                     // Check expiry
                     if entry.expires_at.map_or(false, |e| Instant::now() > e) {
@@ -94,7 +94,7 @@ pub async fn handle_command(
         }
         "LPUSH" | "RPUSH" => {
             if let (Some(key), Some(_value)) = (args.get(0), args.get(1)) {
-                let mut db_map = db.lock().await;
+                let mut db_map = state.db.lock().await;
                 let entry = db_map.entry(key.to_string()).or_insert_with(|| ValueEntry {
                     value: DataStoreValue::List(Vec::new()),
                     expires_at: None,
@@ -106,7 +106,7 @@ pub async fn handle_command(
                     let mut client_to_wake = None;
                     {
                         // Scoped lock for blocked_clients
-                        let mut blocked_map = blocked_clients.lock().await;
+                        let mut blocked_map = state.blocked_clients.lock().await;
                         if let Some(queue) = blocked_map.get_mut(key) {
                             if !queue.is_empty() {
                                 // Get the sender, but don't remove it yet.
@@ -148,7 +148,7 @@ pub async fn handle_command(
             if let (Some(key), Some(start_ind), Some(end_ind)) =
                 (args.get(0), args.get(1), args.get(2))
             {
-                let map = db.lock().await;
+                let map = state.db.lock().await;
                 if let Some(entry) = map.get(key) {
                     match &entry.value {
                         DataStoreValue::List(val) => {
@@ -218,7 +218,7 @@ pub async fn handle_command(
         }
         "LLEN" => {
             if let Some(key) = args.get(0) {
-                let map = db.lock().await;
+                let map = state.db.lock().await;
                 if let Some(entry) = map.get(key) {
                     match &entry.value {
                         DataStoreValue::List(val) => {
@@ -241,7 +241,7 @@ pub async fn handle_command(
         }
         "LPOP" => {
             if let Some(key) = args.get(0) {
-                let mut map = db.lock().await;
+                let mut map = state.db.lock().await;
                 if let Some(entry) = map.get_mut(key) {
                     match &mut entry.value {
                         DataStoreValue::List(val) => {
@@ -291,7 +291,7 @@ pub async fn handle_command(
             };
 
             for key in &args[0..(args.len() - 1)] {
-                let mut db_map = db.lock().await;
+                let mut db_map = state.db.lock().await;
                 if let Some(entry) = db_map.get_mut(key) {
                     if let DataStoreValue::List(val) = &mut entry.value {
                         if !val.is_empty() {
@@ -316,7 +316,7 @@ pub async fn handle_command(
                 let blocked_id = nanoid!();
                 {
                     // Lock, modify, and quickly unlock the blocked clients map
-                    let mut blocked_map = blocked_clients.lock().await;
+                    let mut blocked_map = state.blocked_clients.lock().await;
                     blocked_map
                         .entry(key.to_string())
                         .or_default()
@@ -341,7 +341,7 @@ pub async fn handle_command(
                 if wait_result.is_ok() {
                     // We were woken up by a push command.
                     // The data is now guaranteed to be in the list.
-                    let mut db_map = db.lock().await; // Re-acquire the lock
+                    let mut db_map = state.db.lock().await; // Re-acquire the lock
                     if let Some(entry) = db_map.get_mut(key) {
                         if let DataStoreValue::List(val) = &mut entry.value {
                             if !val.is_empty() {
@@ -363,7 +363,7 @@ pub async fn handle_command(
                 } else {
                     // We timed out or the channel was closed.
                     // Clean up the waiting client entry.
-                    let mut blocked_map = blocked_clients.lock().await;
+                    let mut blocked_map = state.blocked_clients.lock().await;
                     if let Some(queue) = blocked_map.get_mut(key) {
                         if let Some(pos) = queue.iter().position(|bs| bs.id == blocked_id) {
                             queue.remove(pos);
@@ -383,7 +383,7 @@ pub async fn handle_command(
                     .await?;
             }
 
-            let map = db.lock().await;
+            let map = state.db.lock().await;
             if let Some(entry) = map.get(&args[0]) {
                 match &entry.value {
                     DataStoreValue::List(_) => {
@@ -410,7 +410,7 @@ pub async fn handle_command(
             }
             let key = args[0].to_string();
             let id = args[1].to_string();
-            let mut map = db.lock().await;
+            let mut map = state.db.lock().await;
             let entry = map.entry(key.to_string()).or_insert(ValueEntry {
                 value: DataStoreValue::Stream(Stream {
                     entries: BTreeMap::new(),
@@ -497,6 +497,8 @@ pub async fn handle_command(
 
                 let response = format!("${}\r\n{}\r\n", calc_id.len(), calc_id);
                 stream.write_all(response.as_bytes()).await?;
+
+                let _ = state.stream_notifier.send(());
             }
         }
         "XRANGE" => {
@@ -518,7 +520,7 @@ pub async fn handle_command(
                 end = format!("{}-0", end);
             }
 
-            let map = db.lock().await;
+            let map = state.db.lock().await;
             if let Some(entry) = map.get(&key) {
                 if let DataStoreValue::Stream(btreemap) = &entry.value {
                     let mut response = String::new();
@@ -546,79 +548,113 @@ pub async fn handle_command(
             }
         }
         "XREAD" => {
-            let (no_of_keys, start, timeout_ms) = if args[0] == "block" {
-                let timeout_ms = args[1].parse().unwrap_or(0);
-                ((args.len() - 3) / 2, 3, timeout_ms)
+            let (no_of_keys, start_idx, timeout_ms) = if args[0].to_lowercase() == "block" {
+                let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
+                (((args.len() - 3) / 2), 3, timeout_ms)
             } else {
-                ((args.len() - 1) / 2, 1, 0)
+                (((args.len() - 1) / 2), 1, 0)
             };
 
-            if timeout_ms != 0 {
-                sleep(Duration::from_millis(timeout_ms)).await;
+            let is_blocking = args[0].to_lowercase() == "block";
+
+            async fn check_for_data(
+                db: &Db,
+                args: &[String],
+                no_of_keys: usize,
+                start_idx: usize,
+            ) -> Option<Vec<(String, Vec<(String, HashMap<String, String>)>)>> {
+                let mut results = Vec::new();
+                let db_map = db.lock().await;
+
+                for i in 0..no_of_keys {
+                    let key = &args[i + start_idx];
+                    let id = &args[args.len() - no_of_keys + i];
+
+                    if let Some(entry) = db_map.get(key) {
+                        if let DataStoreValue::Stream(stream_data) = &entry.value {
+                            let entries: Vec<_> = stream_data
+                                .entries
+                                .range((Excluded(id.to_string()), Unbounded))
+                                .map(|(id, fields)| (id.clone(), fields.clone()))
+                                .collect();
+
+                            if !entries.is_empty() {
+                                results.push((key.to_string(), entries));
+                            }
+                        }
+                    }
+                }
+
+                if results.is_empty() {
+                    None
+                } else {
+                    Some(results)
+                }
             }
 
-            let mut results: Vec<(String, Vec<(String, HashMap<String, String>)>)> = Vec::new();
-            let db_map = db.lock().await;
+            // 1. Fast Path: Check for data immediately.
+            let mut final_results = check_for_data(&state.db, args, no_of_keys, start_idx).await;
 
-            // PASS 1: Collect results from all streams that have new data.
-            for i in 0..no_of_keys {
-                let key = &args[i + start];
-                let id = &args[args.len() - no_of_keys + i];
+            // 2. Blocking Path: If no data and BLOCK was specified.
+            if final_results.is_none() && is_blocking {
+                let mut rx = state.stream_notifier.subscribe();
 
-                if let Some(entry) = db_map.get(key) {
-                    if let DataStoreValue::Stream(b_tree_map) = &entry.value {
-                        // Collect entries with an ID > the specified id.
-                        let entries: Vec<_> = b_tree_map
-                            .entries
-                            .range((Excluded(id.to_string()), Unbounded))
-                            .map(|(entry_id, fields)| (entry_id.clone(), fields.clone()))
-                            .collect();
-
-                        // Only add to results if there are new entries.
-                        if !entries.is_empty() {
-                            results.push((key.to_string(), entries));
+                if timeout_ms > 0 {
+                    // Timed block
+                    if let Ok(Ok(_)) = timeout(Duration::from_millis(timeout_ms), rx.recv()).await {
+                        // Woken by a notification, check again.
+                        final_results =
+                            check_for_data(&state.db, args, no_of_keys, start_idx).await;
+                    }
+                } else {
+                    // Indefinite block (timeout is 0)
+                    loop {
+                        if rx.recv().await.is_ok() {
+                            // Woken by a notification, check for data.
+                            final_results =
+                                check_for_data(&state.db, args, no_of_keys, start_idx).await;
+                            if final_results.is_some() {
+                                // Data found for our keys, break the wait loop.
+                                break;
+                            }
+                            // Spurious wakeup (data was for other keys), loop and wait again.
+                        } else {
+                            // Channel closed, server is likely shutting down.
+                            break;
                         }
                     }
                 }
             }
 
-            // Drop the lock as soon as we're done reading from the database.
-            drop(db_map);
-
-            // PASS 2: Format the response based on what was collected.
-            if results.is_empty() {
-                // If no stream had any new entries, send the null bulk string.
-                stream.write_all(null.as_bytes()).await?;
-            } else {
-                // If we have results, format them correctly.
+            // 3. Format and send the response.
+            if let Some(results) = final_results {
                 let mut response = String::new();
                 response.push_str(&format!("*{}\r\n", results.len()));
-
                 for (key, entries) in results {
-                    // Start the response for this specific stream: an array of [key, entries]
                     response.push_str("*2\r\n");
                     response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
                     response.push_str(&format!("*{}\r\n", entries.len()));
-
                     for (entry_id, fields) in entries {
                         response.push_str("*2\r\n");
                         response.push_str(&format!("${}\r\n{}\r\n", entry_id.len(), entry_id));
                         response.push_str(&format!("*{}\r\n", fields.len() * 2));
                         for (field_key, field_value) in fields {
-                            response.push_str(&format!(
-                                "${}\r\n{}\r\n",
-                                field_key.len(),
-                                field_key
-                            ));
-                            response.push_str(&format!(
+                            write!(&mut response, "${}\r\n{}\r\n", field_key.len(), field_key)
+                                .unwrap();
+                            write!(
+                                &mut response,
                                 "${}\r\n{}\r\n",
                                 field_value.len(),
                                 field_value
-                            ));
+                            )
+                            .unwrap();
                         }
                     }
                 }
                 stream.write_all(response.as_bytes()).await?;
+            } else {
+                // No results found (either non-blocking or timed out).
+                stream.write_all(null.as_bytes()).await?;
             }
         }
         _ => {

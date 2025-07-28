@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, oneshot, broadcast};
 
 pub enum DataStoreValue {
     String(String),
@@ -22,6 +22,12 @@ pub struct ValueEntry {
 pub struct Stream {
     pub entries: BTreeMap<String, HashMap<String, String>>,
     pub last_id: String,
+}
+
+pub struct AppState {
+    pub db: Db,
+    pub blocked_clients: BlockedClients,
+    pub stream_notifier: broadcast::Sender<()>,
 }
 
 pub type Db = Arc<Mutex<HashMap<String, ValueEntry>>>;
