@@ -30,5 +30,11 @@ pub struct AppState {
     pub stream_notifier: broadcast::Sender<()>,
 }
 
+pub struct TransactionState {
+    pub in_transaction: bool,
+    pub queued_commands: Vec<String>,
+}
+
+
 pub type Db = Arc<Mutex<HashMap<String, ValueEntry>>>;
 pub type BlockedClients = Arc<Mutex<HashMap<String, VecDeque<BlockedSender>>>>;

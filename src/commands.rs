@@ -1,4 +1,6 @@
-use crate::storage::{AppState, BlockedSender, DataStoreValue, Db, Stream, ValueEntry};
+use crate::storage::{
+    AppState, BlockedSender, DataStoreValue, Db, Stream, TransactionState, ValueEntry,
+};
 use nanoid::nanoid;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap};
@@ -16,6 +18,7 @@ pub async fn handle_command(
     parsed: Vec<String>,
     stream: &mut TcpStream,
     state: &Arc<AppState>,
+    transation_state: &mut TransactionState,
 ) -> std::io::Result<()> {
     let command = parsed.get(0).unwrap().to_uppercase();
     let args = &parsed[1..];
@@ -717,6 +720,21 @@ pub async fn handle_command(
                 stream
                     .write_all(b"-ERR wrong number of arguments for 'incr' command\r\n")
                     .await?;
+            }
+        }
+        "MULTI" => {
+            transation_state.queued_commands.clear();
+            transation_state.in_transaction = true;
+            stream.write_all(ok.as_bytes()).await?;
+        }
+        "EXEC" => {
+            if !transation_state.in_transaction {
+                stream.write_all(b"-ERR EXEC without MULTI\r\n").await?;
+                return Ok(());
+            }
+            if transation_state.queued_commands.is_empty() {
+                stream.write_all(empty_arr.as_bytes()).await?;
+                return Ok(());
             }
         }
         _ => {
