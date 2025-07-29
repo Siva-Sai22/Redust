@@ -28,6 +28,14 @@ pub async fn handle_command(
     let empty_arr = "*0\r\n";
     let type_err = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
 
+    if transation_state.in_transaction && command != "MULTI" && command != "EXEC" {
+        transation_state
+            .queued_commands
+            .insert(command, parsed[1..].to_vec());
+        stream.write_all(b"+QUEUED\r\n").await?;
+        return Ok(());
+    }
+
     match command.as_str() {
         "PING" => {
             stream.write_all(b"+PONG\r\n").await?;

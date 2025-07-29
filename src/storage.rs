@@ -32,7 +32,7 @@ pub struct AppState {
 
 pub struct TransactionState {
     pub in_transaction: bool,
-    pub queued_commands: Vec<String>,
+    pub queued_commands: HashMap<String,Vec<String>>,
 }
 
 
