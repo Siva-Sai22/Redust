@@ -27,7 +27,11 @@ pub async fn handle_command<W: AsyncWriteExt + Unpin>(
     let empty_arr = "*0\r\n";
     let type_err = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
 
-    if transation_state.in_transaction && command != "MULTI" && command != "EXEC" {
+    if transation_state.in_transaction
+        && command != "MULTI"
+        && command != "EXEC"
+        && command != "DISCARD"
+    {
         transation_state.queued_commands.push(parsed.to_vec());
         stream.write_all(b"+QUEUED\r\n").await?;
         return Ok(());
@@ -768,6 +772,16 @@ pub async fn handle_command<W: AsyncWriteExt + Unpin>(
             }
 
             stream.write_all(response.as_bytes()).await?;
+        }
+        "DISCARD" => {
+            if !transation_state.in_transaction {
+                stream.write_all(b"-ERR DISCARD without MULTI\r\n").await?;
+                return Ok(());
+            }
+
+            transation_state.in_transaction = false;
+            transation_state.queued_commands.clear();
+            stream.write_all(ok.as_bytes()).await?;
         }
         _ => {
             let err_msg = format!(
