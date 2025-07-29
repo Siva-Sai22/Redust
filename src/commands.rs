@@ -8,15 +8,14 @@ use std::fmt::Write;
 use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 // Central function to process commands.
-pub async fn handle_command(
+pub async fn handle_command<W: AsyncWriteExt + Unpin>(
     parsed: Vec<String>,
-    stream: &mut TcpStream,
+    stream: &mut W,
     state: &Arc<AppState>,
     transation_state: &mut TransactionState,
 ) -> std::io::Result<()> {
@@ -29,9 +28,7 @@ pub async fn handle_command(
     let type_err = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
 
     if transation_state.in_transaction && command != "MULTI" && command != "EXEC" {
-        transation_state
-            .queued_commands
-            .insert(command, parsed[1..].to_vec());
+        transation_state.queued_commands.push(parsed.to_vec());
         stream.write_all(b"+QUEUED\r\n").await?;
         return Ok(());
     }
@@ -745,6 +742,32 @@ pub async fn handle_command(
                 stream.write_all(empty_arr.as_bytes()).await?;
                 return Ok(());
             }
+
+            let queued_commands = transation_state.queued_commands.clone();
+            transation_state.queued_commands.clear();
+            transation_state.in_transaction = false;
+
+            let mut response = String::new();
+            response.push_str(&format!("*{}\r\n", queued_commands.len()));
+
+            for commands in queued_commands {
+                let (mut reader, mut writer) = tokio::io::duplex(4096);
+                let _ = Box::pin(handle_command(
+                    commands.to_vec(),
+                    &mut writer,
+                    state,
+                    transation_state,
+                ))
+                .await;
+
+                drop(writer);
+
+                let mut buf = Vec::new();
+                reader.read_to_end(&mut buf).await?;
+                response.push_str(String::from_utf8_lossy(&buf).as_ref());
+            }
+
+            stream.write_all(response.as_bytes()).await?;
         }
         _ => {
             let err_msg = format!(
