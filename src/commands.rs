@@ -733,6 +733,7 @@ pub async fn handle_command(
                 return Ok(());
             }
             if transation_state.queued_commands.is_empty() {
+                transation_state.in_transaction = false;
                 stream.write_all(empty_arr.as_bytes()).await?;
                 return Ok(());
             }
