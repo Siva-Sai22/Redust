@@ -783,6 +783,10 @@ pub async fn handle_command<W: AsyncWriteExt + Unpin>(
             transation_state.queued_commands.clear();
             stream.write_all(ok.as_bytes()).await?;
         }
+        "INFO" => {
+            let response = format!("$4\r\nrole\r\n:$6\r\nmaster\r\n");
+            stream.write_all(response.as_bytes()).await?;
+        }
         _ => {
             let err_msg = format!(
                 "-ERR unknown command `{}`, with args beginning with: {:?}\r\n",
