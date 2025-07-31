@@ -784,7 +784,12 @@ pub async fn handle_command<W: AsyncWriteExt + Unpin>(
             stream.write_all(ok.as_bytes()).await?;
         }
         "INFO" => {
-            let response = format!("$4\r\nrole\r\n:$6\r\nmaster\r\n");
+            let mut response = String::new();
+            if let Some(_) = state.replica_of {
+                response.push_str("$10\r\nrole:slave\r\n");
+            } else {
+                response.push_str("$11\r\nrole:master\r\n");
+            }
             stream.write_all(response.as_bytes()).await?;
         }
         _ => {

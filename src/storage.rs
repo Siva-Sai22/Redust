@@ -28,6 +28,7 @@ pub struct AppState {
     pub db: Db,
     pub blocked_clients: BlockedClients,
     pub stream_notifier: broadcast::Sender<()>,
+    pub replica_of: Option<String>,
 }
 
 pub struct TransactionState {

@@ -17,11 +17,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Initialize the shared database
     let (stream_notifier_tx, _) = broadcast::channel::<()>(16);
+    let replica_of = std::env::args().nth(4);
 
     let state = Arc::new(AppState {
         db: Arc::new(Mutex::new(HashMap::new())),
         blocked_clients: Arc::new(Mutex::new(HashMap::new())),
         stream_notifier: stream_notifier_tx,
+        replica_of,
     });
 
     // Start the server
