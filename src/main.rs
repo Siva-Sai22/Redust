@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
+use std::env;
 
 use crate::storage::AppState;
 
@@ -17,7 +18,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Initialize the shared database
     let (stream_notifier_tx, _) = broadcast::channel::<()>(16);
-    let replica_of = std::env::args().nth(4);
+    let replica_of = env::args().nth(4);
 
     let state = Arc::new(AppState {
         db: Arc::new(Mutex::new(HashMap::new())),
