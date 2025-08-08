@@ -1,34 +1,61 @@
-[![progress-banner](https://backend.codecrafters.io/progress/redis/a46fc790-b83b-444d-833c-303c79ef7fee)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# Redis Clone in Rust
 
-This is a starting point for Rust solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+This project is a toy Redis server implemented in Rust. It is an asynchronous, multi-threaded server built using Tokio, capable of handling multiple concurrent clients and a subset of Redis commands.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+## Features
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+The server supports a variety of Redis commands across different data types.
 
-# Passing the first stage
+### General Commands
+- `PING`: Checks the server's availability.
+- `ECHO`: Returns the provided string.
+- `INFO`: Provides information about the server (e.g., role).
 
-The entry point for your Redis implementation is in `src/main.rs`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+### String Commands
+- `SET <key> <value> [PX <milliseconds>]`: Sets a string value for a key, with optional expiration.
+- `GET <key>`: Retrieves the value of a key.
+- `INCR <key>`: Increments the integer value of a key by one.
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
+### List Commands
+- `LPUSH <key> <element...>`: Prepends one or more elements to a list.
+- `RPUSH <key> <element...>`: Appends one or more elements to a list.
+- `LPOP <key> [count]`: Removes and returns the first element(s) of a list.
+- `BLPOP <key...> <timeout>`: A blocking version of `LPOP`.
+- `LRANGE <key> <start> <stop>`: Gets a range of elements from a list.
+- `LLEN <key>`: Gets the length of a list.
 
-That's all!
+### Stream Commands
+- `TYPE <key>`: Returns the type of value stored at a key.
+- `XADD <key> <ID> <field> <value>...`: Adds a new entry to a stream.
+- `XRANGE <key> <start> <end>`: Returns a range of entries from a stream.
+- `XREAD [BLOCK <milliseconds>] STREAMS <key...> <ID...>`: Reads from one or more streams, with an option to block.
 
-# Stage 2 & beyond
+### Transactions
+- `MULTI`: Marks the start of a transaction block.
+- `EXEC`: Executes all commands queued in a transaction.
+- `DISCARD`: Flushes all commands queued in a transaction.
 
-Note: This section is for stages 2 and beyond.
+## Architecture
+- **Asynchronous I/O**: Built on `tokio` for high-performance, non-blocking network I/O.
+- **Concurrent**: Handles multiple client connections simultaneously, each in its own green thread (task).
+- **In-Memory Storage**: Uses a thread-safe, in-memory `HashMap` to store data.
+- **RESP Protocol**: Parses and responds using the Redis Serialization Protocol (RESP).
 
-1. Ensure you have `cargo (1.88)` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+## How to Run
+
+1.  **Prerequisites**: Ensure you have Rust and Cargo installed (e.g., `cargo 1.78.0`).
+2.  **Build & Run**: Execute the provided shell script to compile and start the server.
+    ```sh
+    ./your_program.sh
+    ```
+    The server will start and listen on `127.0.0.1:6379` by default.
+3.  **Interact with the server**: Use a Redis client like `redis-cli` to connect and send commands.
+    ```sh
+    redis-cli
+    > PING
+    PONG
+    > SET name redis
+    OK
+    > GET name
+    "redis"
+    ```

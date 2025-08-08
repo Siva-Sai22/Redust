@@ -24,11 +24,28 @@ pub async fn handle_info<W: AsyncWriteExt + Unpin>(
     stream: &mut W,
     state: &Arc<AppState>,
 ) -> std::io::Result<()> {
-    let mut response = String::new();
-    if let Some(_) = &state.replica_of {
-        response.push_str("$10\r\nrole:slave\r\n");
+    // --- Start building the response parts ---
+
+    // Part 1: Role
+    let role_str = if state.replica_of.is_some() {
+        "role:slave"
     } else {
-        response.push_str("$11\r\nrole:master\r\n");
-    }
-    stream.write_all(response.as_bytes()).await
+        "role:master"
+    };
+
+    // Part 2: Replication ID
+    let master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
+    let replid_str = format!("master_replid:{}", master_replid);
+
+    // Part 3: Replication Offset
+    let master_repl_offset = 0;
+    let reploff_str = format!("master_repl_offset:{}", master_repl_offset);
+
+    // --- Construct the final RESP response ---
+
+    let response = format!("{}\r\n{}\r\n{}", role_str, replid_str, reploff_str);
+
+    stream
+        .write_all(format!("${}\r\n{}\r\n", response.len(), response).as_bytes())
+        .await
 }
