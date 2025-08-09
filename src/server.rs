@@ -33,6 +33,7 @@ pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
         master_stream.read(&mut buf).await?;
 
         master_stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n").await?;
+        master_stream.read(&mut buf).await?;
     }
 
     loop {

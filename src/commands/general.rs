@@ -1,5 +1,5 @@
 use crate::storage::AppState;
-use std::{os::linux::raw::stat, sync::Arc};
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
 pub async fn handle_ping<W: AsyncWriteExt + Unpin>(stream: &mut W) -> std::io::Result<()> {
