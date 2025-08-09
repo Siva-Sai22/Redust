@@ -3,6 +3,7 @@ pub mod list;
 pub mod stream;
 pub mod string;
 pub mod transaction;
+pub mod replication;
 
 use crate::storage::{AppState, TransactionState};
 use std::sync::Arc;
@@ -47,6 +48,7 @@ pub async fn handle_command<W: AsyncWriteExt + Unpin>(
         "MULTI" => transaction::handle_multi(stream, transation_state).await,
         "EXEC" => transaction::handle_exec(stream, state, transation_state).await,
         "DISCARD" => transaction::handle_discard(stream, transation_state).await,
+        "REPLCONF" => replication::handle_replconf(stream, state, args).await,
         _ => {
             let err_msg = format!(
                 "-ERR unknown command `{}`, with args beginning with: {:?}\r\n",

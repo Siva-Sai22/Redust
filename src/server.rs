@@ -16,6 +16,25 @@ pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
     println!("🚀 Server listening on 127.0.0.1:{}", port);
 
+    if let Some(replica) = state.replica_of.clone() {
+        let arr = replica.split(" ").collect::<Vec<&str>>();
+        let master_addr = format!("{}:{}", arr[0], arr[1]);
+
+        let mut master_stream = TcpStream::connect(master_addr).await?;
+        master_stream.write_all(b"*1\r\n$4\r\nPING\r\n").await?;
+
+        let mut buf = [0; 1024];
+        master_stream.read(&mut buf).await?;
+
+        master_stream.write_all(format!("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{}\r\n", port).as_bytes()).await?;
+        master_stream.read(&mut buf).await?;
+
+        master_stream.write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n").await?;
+        master_stream.read(&mut buf).await?;
+
+        master_stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n").await?;
+    }
+
     loop {
         let (socket, addr) = listener.accept().await?;
         println!("Accepted new connection from: {}", addr);
