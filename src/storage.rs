@@ -29,6 +29,8 @@ pub struct AppState {
     pub blocked_clients: BlockedClients,
     pub stream_notifier: broadcast::Sender<()>,
     pub replica_of: Option<String>,
+    pub replication_id: String,
+    pub replication_offset: u64,
 }
 
 pub struct TransactionState {

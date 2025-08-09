@@ -25,6 +25,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         blocked_clients: Arc::new(Mutex::new(HashMap::new())),
         stream_notifier: stream_notifier_tx,
         replica_of,
+        replication_id: String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"),
+        replication_offset: 0,
     });
 
     // Start the server

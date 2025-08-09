@@ -1,5 +1,5 @@
 use crate::storage::AppState;
-use std::sync::Arc;
+use std::{os::linux::raw::stat, sync::Arc};
 use tokio::io::AsyncWriteExt;
 
 pub async fn handle_ping<W: AsyncWriteExt + Unpin>(stream: &mut W) -> std::io::Result<()> {
@@ -34,12 +34,9 @@ pub async fn handle_info<W: AsyncWriteExt + Unpin>(
     };
 
     // Part 2: Replication ID
-    let master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
-    let replid_str = format!("master_replid:{}", master_replid);
-
+    let replid_str = format!("master_replid:{}", state.replication_id);
     // Part 3: Replication Offset
-    let master_repl_offset = 0;
-    let reploff_str = format!("master_repl_offset:{}", master_repl_offset);
+    let reploff_str = format!("master_repl_offset:{}", state.replication_offset);
 
     // --- Construct the final RESP response ---
 
