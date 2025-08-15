@@ -1,3 +1,4 @@
+use crate::protocol;
 use crate::storage::{AppState, BlockedSender, DataStoreValue, ValueEntry};
 use nanoid::nanoid;
 use std::cmp::{max, min};
@@ -56,7 +57,19 @@ pub async fn handle_lpush_rpush<W: AsyncWriteExt + Unpin>(
             }
 
             let response = format!(":{}\r\n", list.len());
-            stream.write_all(response.as_bytes()).await
+            let _ = stream.write_all(response.as_bytes()).await;
+            let mut replicas = state.replicas.lock().await;
+            for replica in replicas.iter_mut() {
+                let mut command_with_args = if command == "LPUSH" {
+                    vec!["LPUSH".to_string()]
+                } else {
+                    vec!["RPUSH".to_string()]
+                };
+                command_with_args.extend_from_slice(args);
+                let response = protocol::serialize_resp_array(&command_with_args);
+                replica.write_all(response.as_bytes()).await?;
+            }
+            return Ok(());
         } else {
             stream.write_all(type_err.as_bytes()).await
         }
@@ -74,9 +87,7 @@ pub async fn handle_lrange<W: AsyncWriteExt + Unpin>(
 ) -> std::io::Result<()> {
     let null = "$-1\r\n";
     let empty_arr = "*0\r\n";
-    if let (Some(key), Some(start_ind), Some(end_ind)) =
-        (args.get(0), args.get(1), args.get(2))
-    {
+    if let (Some(key), Some(start_ind), Some(end_ind)) = (args.get(0), args.get(1), args.get(2)) {
         let map = state.db.lock().await;
         if let Some(entry) = map.get(key) {
             match &entry.value {
@@ -173,7 +184,7 @@ pub async fn handle_lpop<W: AsyncWriteExt + Unpin>(
     if let Some(key) = args.get(0) {
         let mut map = state.db.lock().await;
         if let Some(entry) = map.get_mut(key) {
-            match &mut entry.value {
+            let _ = match &mut entry.value {
                 DataStoreValue::List(val) => {
                     if let Some(num_of_ele) = args.get(1) {
                         let num_of_ele = num_of_ele.parse::<u32>().unwrap();
@@ -190,7 +201,15 @@ pub async fn handle_lpop<W: AsyncWriteExt + Unpin>(
                     }
                 }
                 _ => stream.write_all(type_err.as_bytes()).await,
+            };
+            let mut replicas = state.replicas.lock().await;
+            for replica in replicas.iter_mut() {
+                let mut command_with_args = vec!["LPOP".to_string()];
+                command_with_args.extend_from_slice(args);
+                let response = protocol::serialize_resp_array(&command_with_args);
+                replica.write_all(response.as_bytes()).await?;
             }
+            return Ok(());
         } else {
             stream.write_all(null.as_bytes()).await
         }
@@ -305,6 +324,13 @@ pub async fn handle_blpop<W: AsyncWriteExt + Unpin>(
             }
             stream.write_all(null.as_bytes()).await?;
         }
+    }
+    let mut replicas = state.replicas.lock().await;
+    for replica in replicas.iter_mut() {
+        let mut command_with_args = vec!["BLPOP".to_string()];
+        command_with_args.extend_from_slice(args);
+        let response = protocol::serialize_resp_array(&command_with_args);
+        replica.write_all(response.as_bytes()).await?;
     }
     Ok(())
 }

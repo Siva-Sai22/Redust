@@ -27,6 +27,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         replica_of,
         replication_id: String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"),
         replication_offset: 0,
+        replicas: Arc::new(Mutex::new(Vec::new())),
     });
 
     // Start the server

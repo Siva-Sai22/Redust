@@ -1,3 +1,4 @@
+use crate::protocol;
 use crate::storage::{AppState, DataStoreValue, Db, Stream, ValueEntry};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
@@ -127,6 +128,13 @@ pub async fn handle_xadd<W: AsyncWriteExt + Unpin>(
         stream.write_all(response.as_bytes()).await?;
 
         let _ = state.stream_notifier.send(());
+    }
+    let mut replicas = state.replicas.lock().await;
+    for replica in replicas.iter_mut() {
+        let mut command_with_args = vec!["XADD".to_string()];
+        command_with_args.extend_from_slice(args);
+        let response = protocol::serialize_resp_array(&command_with_args);
+        replica.write_all(response.as_bytes()).await?;
     }
     Ok(())
 }

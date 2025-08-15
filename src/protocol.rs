@@ -26,3 +26,11 @@ pub fn parse_resp(input: &str) -> Result<Vec<String>, &str> {
 
     Ok(result)
 }
+
+pub fn serialize_resp_array(items: &[String]) -> String {
+    let mut resp = format!("*{}\r\n", items.len());
+    for item in items {
+        resp.push_str(&format!("${}\r\n{}\r\n", item.len(), item));
+    }
+    resp
+}

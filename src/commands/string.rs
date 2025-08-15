@@ -1,3 +1,4 @@
+use crate::protocol;
 use crate::storage::{AppState, DataStoreValue, ValueEntry};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -24,7 +25,15 @@ pub async fn handle_set<W: AsyncWriteExt + Unpin>(
             expires_at,
         };
         map.insert(key.to_string(), entry);
-        stream.write_all(ok.as_bytes()).await
+        let _ = stream.write_all(ok.as_bytes()).await;
+        let mut replicas = state.replicas.lock().await;
+        for replica in replicas.iter_mut() {
+            let mut command_with_args = vec!["SET".to_string()];
+            command_with_args.extend_from_slice(args);
+            let response = protocol::serialize_resp_array(&command_with_args);
+            replica.write_all(response.as_bytes()).await?;
+        }
+        return Ok(());
     } else {
         stream
             .write_all(b"-ERR wrong number of arguments for 'set' command\r\n")
@@ -102,7 +111,15 @@ pub async fn handle_incr<W: AsyncWriteExt + Unpin>(
                     expires_at: None,
                 },
             );
-            stream.write_all(":1\r\n".as_bytes()).await
+            let _ = stream.write_all(":1\r\n".as_bytes()).await;
+            let mut replicas = state.replicas.lock().await;
+            for replica in replicas.iter_mut() {
+                let mut command_with_args = vec!["INCR".to_string()];
+                command_with_args.extend_from_slice(args);
+                let response = protocol::serialize_resp_array(&command_with_args);
+                replica.write_all(response.as_bytes()).await?;
+            }
+            return Ok(());
         }
     } else {
         stream

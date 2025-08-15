@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use tokio::net::TcpStream;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, oneshot, broadcast};
@@ -31,6 +32,7 @@ pub struct AppState {
     pub replica_of: Option<String>,
     pub replication_id: String,
     pub replication_offset: u64,
+    pub replicas: Arc<Mutex<Vec<TcpStream>>>,
 }
 
 pub struct TransactionState {

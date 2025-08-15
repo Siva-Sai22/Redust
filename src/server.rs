@@ -26,13 +26,25 @@ pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
         let mut buf = [0; 1024];
         master_stream.read(&mut buf).await?;
 
-        master_stream.write_all(format!("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{}\r\n", port).as_bytes()).await?;
+        master_stream
+            .write_all(
+                format!(
+                    "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{}\r\n",
+                    port
+                )
+                .as_bytes(),
+            )
+            .await?;
         master_stream.read(&mut buf).await?;
 
-        master_stream.write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n").await?;
+        master_stream
+            .write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
+            .await?;
         master_stream.read(&mut buf).await?;
 
-        master_stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n").await?;
+        master_stream
+            .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
+            .await?;
         master_stream.read(&mut buf).await?;
     }
 
@@ -69,14 +81,27 @@ async fn handle_stream(
 
         if let Ok(received) = std::str::from_utf8(&buf[..n]) {
             if let Ok(parsed) = protocol::parse_resp(received) {
-                if let Err(e) =
-                    commands::handle_command(parsed, &mut stream, &state, &mut transation_state)
-                        .await
+                match commands::handle_command(
+                    parsed.clone(),
+                    &mut stream,
+                    &state,
+                    &mut transation_state,
+                )
+                .await
                 {
-                    eprintln!("Error handling command: {}", e);
-                    // Optionally, write an error back to the client
-                    let _ = stream.write_all(b"-ERR server error\r\n").await;
-                    return;
+                    Ok(_) => {
+                        if parsed[0].to_uppercase() == "PSYNC" {
+                            let mut replicas = state.replicas.lock().await;
+                            replicas.push(stream);
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error handling command: {}", e);
+                        // Optionally, write an error back to the client
+                        let _ = stream.write_all(b"-ERR server error\r\n").await;
+                        return;
+                    }
                 }
             }
         }
