@@ -45,7 +45,20 @@ pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
         master_stream
             .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
             .await?;
-        master_stream.read(&mut buf).await?;
+
+        let mut rdb_buf = [0; 4096];
+        let n = master_stream.read(&mut rdb_buf).await?;
+        let rdb_content = &rdb_buf[..n];
+        let remaining_data = if let Some(pos) = rdb_content.iter().position(|&b| b == b'*') {
+            rdb_content[pos..].to_vec()
+        } else {
+            Vec::new() // No command data yet, start with an empty buffer
+        };
+
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            handle_master_stream(master_stream, state_clone, remaining_data).await;
+        });
     }
 
     loop {
@@ -67,10 +80,52 @@ async fn handle_stream(
     state: Arc<AppState>,
     mut transation_state: TransactionState,
 ) {
-    let mut buf = [0; 1024];
+    let mut buffer = Vec::with_capacity(1024);
+    let mut temp_buf = [0; 1024];
 
     loop {
-        let n = match stream.read(&mut buf).await {
+        // Attempt to parse commands from the buffer before reading more data
+        loop {
+            let received_str = match std::str::from_utf8(&buffer) {
+                Ok(s) => s,
+                Err(_) => break, // Incomplete UTF-8, need more data
+            };
+
+            match protocol::parse_resp(received_str) {
+                Ok((parsed, consumed_bytes)) => {
+                    match commands::handle_command(
+                        parsed.clone(),
+                        &mut stream,
+                        &state,
+                        &mut transation_state,
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            if parsed[0].to_uppercase() == "PSYNC" {
+                                let mut replicas = state.replicas.lock().await;
+                                replicas.push(stream);
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error handling command: {}", e);
+                            let _ = stream.write_all(b"-ERR server error\r\n").await;
+                            return;
+                        }
+                    }
+                    // Remove the processed command from the buffer
+                    buffer.drain(..consumed_bytes);
+                }
+                Err(_) => {
+                    // Not enough data to parse a full command, break to read more
+                    break;
+                }
+            }
+        }
+
+        // Read more data from the client
+        let n = match stream.read(&mut temp_buf).await {
             Ok(0) => return, // Connection closed
             Ok(n) => n,
             Err(e) => {
@@ -78,31 +133,67 @@ async fn handle_stream(
                 return;
             }
         };
+        buffer.extend_from_slice(&temp_buf[..n]);
+    }
+}
 
-        if let Ok(received) = std::str::from_utf8(&buf[..n]) {
-            if let Ok(parsed) = protocol::parse_resp(received) {
-                match commands::handle_command(
-                    parsed.clone(),
-                    &mut stream,
-                    &state,
-                    &mut transation_state,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        if parsed[0].to_uppercase() == "PSYNC" {
-                            let mut replicas = state.replicas.lock().await;
-                            replicas.push(stream);
-                            return;
+async fn handle_master_stream(mut stream: TcpStream, state: Arc<AppState>, initial_data: Vec<u8>) {
+    let mut buffer = initial_data;
+    let mut temp_buf = [0; 1024];
+
+    loop {
+        loop {
+            let received_str = match std::str::from_utf8(&buffer) {
+                Ok(s) => s,
+                Err(_) => break, // Incomplete UTF-8 sequence, need more data
+            };
+
+            match protocol::parse_resp(received_str) {
+                Ok((parsed_command, consumed_bytes)) => {
+                    let mut dummy_stream = tokio::io::sink(); // Dummy writer
+                    let mut dummy_transaction_state = TransactionState {
+                        in_transaction: false,
+                        queued_commands: Vec::new(),
+                    };
+
+                    match commands::handle_command(
+                        parsed_command,
+                        &mut dummy_stream,
+                        &state,
+                        &mut dummy_transaction_state,
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            println!("Processed propagated command.");
+                        }
+                        Err(e) => {
+                            eprintln!("Error processing propagated command: {}", e);
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Error handling command: {}", e);
-                        // Optionally, write an error back to the client
-                        let _ = stream.write_all(b"-ERR server error\r\n").await;
-                        return;
-                    }
+
+                    // Remove the processed command from the buffer
+                    buffer.drain(..consumed_bytes);
                 }
+                Err(_) => {
+                    // Not enough data to parse a full command, break to read more
+                    break;
+                }
+            }
+        }
+
+        // Read more data from the master
+        match stream.read(&mut temp_buf).await {
+            Ok(0) => {
+                println!("Master connection closed.");
+                return;
+            }
+            Ok(n) => {
+                buffer.extend_from_slice(&temp_buf[..n]);
+            }
+            Err(e) => {
+                eprintln!("Failed to read from master socket; err = {:?}", e);
+                return;
             }
         }
     }
