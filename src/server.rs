@@ -46,18 +46,40 @@ pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
             .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
             .await?;
 
-        let mut rdb_buf = [0; 4096];
-        let n = master_stream.read(&mut rdb_buf).await?;
-        let rdb_content = &rdb_buf[..n];
-        let remaining_data = if let Some(pos) = rdb_content.iter().position(|&b| b == b'*') {
-            rdb_content[pos..].to_vec()
-        } else {
-            Vec::new() // No command data yet, start with an empty buffer
-        };
+        // Read the FULLRESYNC response line
+        let mut response_line = Vec::new();
+        let mut byte = [0u8; 1];
+        while response_line.len() < 2 || response_line[response_line.len() - 2..] != [b'\r', b'\n']
+        {
+            master_stream.read_exact(&mut byte).await?;
+            response_line.push(byte[0]);
+        }
+        let _ = String::from_utf8_lossy(&response_line);
+
+        // Read the RDB size line ($<length>\r\n)
+        let mut rdb_size_line = Vec::new();
+        let mut byte = [0u8; 1];
+        while rdb_size_line.len() < 2 || rdb_size_line[rdb_size_line.len() - 2..] != [b'\r', b'\n']
+        {
+            master_stream.read_exact(&mut byte).await?;
+            rdb_size_line.push(byte[0]);
+        }
+        let rdb_size_str = String::from_utf8_lossy(&rdb_size_line);
+
+        // Parse the RDB size
+        let rdb_size: usize = rdb_size_str
+            .trim_start_matches('$')
+            .trim_end_matches("\r\n")
+            .parse()
+            .expect("Invalid RDB size format");
+
+        // Read the exact RDB content
+        let mut rdb_data = vec![0u8; rdb_size];
+        master_stream.read_exact(&mut rdb_data).await?;
 
         let state_clone = state.clone();
         tokio::spawn(async move {
-            handle_master_stream(master_stream, state_clone, remaining_data).await;
+            handle_master_stream(master_stream, state_clone, Vec::new()).await;
         });
     }
 
@@ -150,20 +172,34 @@ async fn handle_master_stream(mut stream: TcpStream, state: Arc<AppState>, initi
 
             match protocol::parse_resp(received_str) {
                 Ok((parsed_command, consumed_bytes)) => {
-                    let mut dummy_stream = tokio::io::sink(); // Dummy writer
+                    println!("parsed command: {:?}", parsed_command);
                     let mut dummy_transaction_state = TransactionState {
                         in_transaction: false,
                         queued_commands: Vec::new(),
                     };
 
-                    match commands::handle_command(
-                        parsed_command,
-                        &mut dummy_stream,
-                        &state,
-                        &mut dummy_transaction_state,
-                    )
-                    .await
-                    {
+                    let command_result = if parsed_command[0].to_uppercase() == "REPLCONF" {
+                        // For REPLCONF, use the real stream to send the ACK back.
+                        commands::handle_command(
+                            parsed_command,
+                            &mut stream,
+                            &state,
+                            &mut dummy_transaction_state,
+                        )
+                        .await
+                    } else {
+                        // For other commands (SET, etc.), use a dummy sink.
+                        let mut sink = tokio::io::sink();
+                        commands::handle_command(
+                            parsed_command,
+                            &mut sink,
+                            &state,
+                            &mut dummy_transaction_state,
+                        )
+                        .await
+                    };
+
+                    match command_result {
                         Ok(_) => {
                             println!("Processed propagated command.");
                         }
@@ -173,6 +209,8 @@ async fn handle_master_stream(mut stream: TcpStream, state: Arc<AppState>, initi
                     }
 
                     // Remove the processed command from the buffer
+                    let mut offset = state.repl_offset.lock().await;
+                    *offset += consumed_bytes as u64;
                     buffer.drain(..consumed_bytes);
                 }
                 Err(_) => {

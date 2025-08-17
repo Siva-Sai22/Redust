@@ -33,6 +33,7 @@ pub struct AppState {
     pub replication_id: String,
     pub replication_offset: u64,
     pub replicas: Arc<Mutex<Vec<TcpStream>>>,
+    pub repl_offset: Arc<Mutex<u64>>,
 }
 
 pub struct TransactionState {
