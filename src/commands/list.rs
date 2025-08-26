@@ -58,17 +58,14 @@ pub async fn handle_lpush_rpush<W: AsyncWriteExt + Unpin>(
 
             let response = format!(":{}\r\n", list.len());
             let _ = stream.write_all(response.as_bytes()).await;
-            let mut replicas = state.replicas.lock().await;
-            for replica in replicas.iter_mut() {
-                let mut command_with_args = if command == "LPUSH" {
-                    vec!["LPUSH".to_string()]
-                } else {
-                    vec!["RPUSH".to_string()]
-                };
-                command_with_args.extend_from_slice(args);
-                let response = protocol::serialize_resp_array(&command_with_args);
-                replica.write_all(response.as_bytes()).await?;
-            }
+
+            let mut command_with_args = if command == "LPUSH" {
+                vec!["LPUSH".to_string()]
+            } else {
+                vec!["RPUSH".to_string()]
+            };
+            command_with_args.extend_from_slice(args);
+            protocol::replicate_command(state, command_with_args).await?;
             return Ok(());
         } else {
             stream.write_all(type_err.as_bytes()).await
@@ -202,13 +199,10 @@ pub async fn handle_lpop<W: AsyncWriteExt + Unpin>(
                 }
                 _ => stream.write_all(type_err.as_bytes()).await,
             };
-            let mut replicas = state.replicas.lock().await;
-            for replica in replicas.iter_mut() {
-                let mut command_with_args = vec!["LPOP".to_string()];
-                command_with_args.extend_from_slice(args);
-                let response = protocol::serialize_resp_array(&command_with_args);
-                replica.write_all(response.as_bytes()).await?;
-            }
+
+            let mut command_with_args = vec!["LPOP".to_string()];
+            command_with_args.extend_from_slice(args);
+            protocol::replicate_command(state, command_with_args).await?;
             return Ok(());
         } else {
             stream.write_all(null.as_bytes()).await
@@ -325,12 +319,8 @@ pub async fn handle_blpop<W: AsyncWriteExt + Unpin>(
             stream.write_all(null.as_bytes()).await?;
         }
     }
-    let mut replicas = state.replicas.lock().await;
-    for replica in replicas.iter_mut() {
-        let mut command_with_args = vec!["BLPOP".to_string()];
-        command_with_args.extend_from_slice(args);
-        let response = protocol::serialize_resp_array(&command_with_args);
-        replica.write_all(response.as_bytes()).await?;
-    }
+    let mut command_with_args = vec!["BLPOP".to_string()];
+    command_with_args.extend_from_slice(args);
+    protocol::replicate_command(state, command_with_args).await?;
     Ok(())
 }

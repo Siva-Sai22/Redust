@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use tokio::net::TcpStream;
-use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, oneshot, broadcast};
 
@@ -25,15 +24,20 @@ pub struct Stream {
     pub last_id: String,
 }
 
+pub struct ReplicaInfo {
+    pub stream: TcpStream,
+    pub offset: u64,
+}
+
 pub struct AppState {
     pub db: Db,
     pub blocked_clients: BlockedClients,
     pub stream_notifier: broadcast::Sender<()>,
     pub replica_of: Option<String>,
-    pub replication_id: String,
-    pub replication_offset: u64,
-    pub replicas: Arc<Mutex<Vec<TcpStream>>>,
-    pub repl_offset: Arc<Mutex<u64>>,
+    pub master_replication_id: String,
+    pub master_replication_offset: Mutex<u64>,
+    pub replicas: Mutex<Vec<ReplicaInfo>>,
+    pub slave_replication_offset: Mutex<u64>,
 }
 
 pub struct TransactionState {
@@ -42,5 +46,5 @@ pub struct TransactionState {
 }
 
 
-pub type Db = Arc<Mutex<HashMap<String, ValueEntry>>>;
-pub type BlockedClients = Arc<Mutex<HashMap<String, VecDeque<BlockedSender>>>>;
+pub type Db = Mutex<HashMap<String, ValueEntry>>;
+pub type BlockedClients = Mutex<HashMap<String, VecDeque<BlockedSender>>>;

@@ -26,13 +26,11 @@ pub async fn handle_set<W: AsyncWriteExt + Unpin>(
         };
         map.insert(key.to_string(), entry);
         let _ = stream.write_all(ok.as_bytes()).await;
-        let mut replicas = state.replicas.lock().await;
-        for replica in replicas.iter_mut() {
-            let mut command_with_args = vec!["SET".to_string()];
-            command_with_args.extend_from_slice(args);
-            let response = protocol::serialize_resp_array(&command_with_args);
-            replica.write_all(response.as_bytes()).await?;
-        }
+
+        let mut command_with_args = vec!["SET".to_string()];
+        command_with_args.extend_from_slice(args);
+        protocol::replicate_command(state, command_with_args).await?;
+
         return Ok(());
     } else {
         stream
@@ -112,13 +110,11 @@ pub async fn handle_incr<W: AsyncWriteExt + Unpin>(
                 },
             );
             let _ = stream.write_all(":1\r\n".as_bytes()).await;
-            let mut replicas = state.replicas.lock().await;
-            for replica in replicas.iter_mut() {
-                let mut command_with_args = vec!["INCR".to_string()];
-                command_with_args.extend_from_slice(args);
-                let response = protocol::serialize_resp_array(&command_with_args);
-                replica.write_all(response.as_bytes()).await?;
-            }
+
+            let mut command_with_args = vec!["INCR".to_string()];
+            command_with_args.extend_from_slice(args);
+            protocol::replicate_command(state, command_with_args).await?;
+
             return Ok(());
         }
     } else {

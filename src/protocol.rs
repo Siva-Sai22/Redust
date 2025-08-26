@@ -1,3 +1,9 @@
+use std::sync::Arc;
+
+use tokio::io::AsyncWriteExt;
+
+use crate::storage::AppState;
+
 pub fn parse_resp(input: &str) -> Result<(Vec<String>, usize), &str> {
     let mut current_pos = 0;
 
@@ -53,4 +59,29 @@ pub fn serialize_resp_array(items: &[String]) -> String {
         resp.push_str(&format!("${}\r\n{}\r\n", item.len(), item));
     }
     resp
+}
+
+pub async fn replicate_command(
+    state: &Arc<AppState>,
+    command_with_args: Vec<String>,
+) -> std::io::Result<()> {
+    // Serialize the command once
+    let serialized_cmd = serialize_resp_array(&command_with_args);
+    let cmd_bytes = serialized_cmd.as_bytes();
+    let cmd_len = cmd_bytes.len() as u64;
+    
+    // Send to all replicas
+    let mut replicas = state.replicas.lock().await;
+    for replica in replicas.iter_mut() {
+        replica.stream.write_all(cmd_bytes).await?;
+    }
+    
+    // Update master replication offset
+    if !replicas.is_empty() {
+        // Only increment if we actually have replicas
+        let mut offset = state.master_replication_offset.lock().await;
+        *offset += cmd_len;
+    }
+    
+    Ok(())
 }

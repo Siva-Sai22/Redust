@@ -50,6 +50,7 @@ pub async fn handle_command<W: AsyncWriteExt + Unpin>(
         "DISCARD" => transaction::handle_discard(stream, transation_state).await,
         "REPLCONF" => replication::handle_replconf(stream, state, args).await,
         "PSYNC" => replication::handle_psync(stream, state, args).await,
+        "WAIT" => replication::handle_wait(stream, state, args).await,
         _ => {
             let err_msg = format!(
                 "-ERR unknown command `{}`, with args beginning with: {:?}\r\n",

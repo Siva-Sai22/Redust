@@ -34,9 +34,9 @@ pub async fn handle_info<W: AsyncWriteExt + Unpin>(
     };
 
     // Part 2: Replication ID
-    let replid_str = format!("master_replid:{}", state.replication_id);
+    let replid_str = format!("master_replid:{}", state.master_replication_id);
     // Part 3: Replication Offset
-    let reploff_str = format!("master_repl_offset:{}", state.replication_offset);
+    let reploff_str = format!("master_repl_offset:{}", state.master_replication_offset.lock().await);
 
     // --- Construct the final RESP response ---
 

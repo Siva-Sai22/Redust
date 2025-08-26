@@ -21,14 +21,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let replica_of = env::args().nth(4);
 
     let state = Arc::new(AppState {
-        db: Arc::new(Mutex::new(HashMap::new())),
-        blocked_clients: Arc::new(Mutex::new(HashMap::new())),
+        db: Mutex::new(HashMap::new()),
+        blocked_clients: Mutex::new(HashMap::new()),
         stream_notifier: stream_notifier_tx,
         replica_of,
-        replication_id: String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"),
-        replication_offset: 0,
-        replicas: Arc::new(Mutex::new(Vec::new())),
-        repl_offset: Arc::new(Mutex::new(0)),
+        master_replication_id: String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"),
+        master_replication_offset: Mutex::new(0),
+        replicas: Mutex::new(Vec::new()),
+        slave_replication_offset: Mutex::new(0),
     });
 
     // Start the server

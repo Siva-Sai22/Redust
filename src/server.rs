@@ -1,5 +1,6 @@
 use crate::commands;
 use crate::protocol;
+use crate::storage;
 use crate::storage::AppState;
 use crate::storage::TransactionState;
 use std::env;
@@ -126,7 +127,11 @@ async fn handle_stream(
                         Ok(_) => {
                             if parsed[0].to_uppercase() == "PSYNC" {
                                 let mut replicas = state.replicas.lock().await;
-                                replicas.push(stream);
+                                let replica_info = storage::ReplicaInfo {
+                                    stream: stream,
+                                    offset: 0,
+                                };
+                                replicas.push(replica_info);
                                 return;
                             }
                         }
@@ -209,7 +214,7 @@ async fn handle_master_stream(mut stream: TcpStream, state: Arc<AppState>, initi
                     }
 
                     // Remove the processed command from the buffer
-                    let mut offset = state.repl_offset.lock().await;
+                    let mut offset = state.slave_replication_offset.lock().await;
                     *offset += consumed_bytes as u64;
                     buffer.drain(..consumed_bytes);
                 }
