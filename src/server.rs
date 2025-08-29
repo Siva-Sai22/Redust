@@ -116,29 +116,45 @@ async fn handle_stream(
 
             match protocol::parse_resp(received_str) {
                 Ok((parsed, consumed_bytes)) => {
-                    match commands::handle_command(
-                        parsed.clone(),
-                        &mut stream,
-                        &state,
-                        &mut transation_state,
-                    )
-                    .await
-                    {
-                        Ok(_) => {
-                            if parsed[0].to_uppercase() == "PSYNC" {
-                                let mut replicas = state.replicas.lock().await;
-                                let replica_info = storage::ReplicaInfo {
-                                    stream: stream,
-                                    offset: 0,
-                                };
-                                replicas.push(replica_info);
-                                return;
+                    if parsed[0].to_uppercase() == "REPLCONF" && parsed[1].to_uppercase() == "ACK" {
+                        // Special handling for REPLCONF ACK to update replica offset
+                        if let Ok(peer_addr) = stream.peer_addr() {
+                            let mut replicas = state.replicas.lock().await;
+                            if let Some(replica) = replicas
+                                .iter_mut()
+                                .find(|r| r.stream.peer_addr().unwrap() == peer_addr)
+                            {
+                                if let Ok(offset) = parsed[2].parse::<u64>() {
+                                    replica.offset = offset;
+                                }
                             }
                         }
-                        Err(e) => {
-                            eprintln!("Error handling command: {}", e);
-                            let _ = stream.write_all(b"-ERR server error\r\n").await;
-                            return;
+                    } else {
+                        match commands::handle_command(
+                            parsed.clone(),
+                            &mut stream,
+                            &state,
+                            &mut transation_state,
+                        )
+                        .await
+                        {
+                            Ok(_) => {
+                                if parsed[0].to_uppercase() == "PSYNC" {
+                                    let mut replicas = state.replicas.lock().await;
+                                    let stream_std = stream.into_std().unwrap();
+                                    let replica_info = storage::ReplicaInfo {
+                                        stream: stream_std.try_clone().unwrap(),
+                                        offset: 0,
+                                    };
+                                    replicas.push(replica_info);
+                                    stream = TcpStream::from_std(stream_std).unwrap();
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Error handling command: {}", e);
+                                let _ = stream.write_all(b"-ERR server error\r\n").await;
+                                return;
+                            }
                         }
                     }
                     // Remove the processed command from the buffer

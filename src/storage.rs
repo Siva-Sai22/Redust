@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use tokio::net::TcpStream;
+use std::net::TcpStream;
 use std::time::Instant;
 use tokio::sync::{Mutex, oneshot, broadcast};
 

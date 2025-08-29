@@ -219,7 +219,7 @@ pub async fn handle_blpop<W: AsyncWriteExt + Unpin>(
     state: &Arc<AppState>,
     args: &[String],
 ) -> std::io::Result<()> {
-    let null = "$-1\r\n";
+    let null = "*-1\r\n";
     if args.len() < 2 {
         return stream
             .write_all(b"-ERR wrong number of arguments for 'blpop' command\r\n")

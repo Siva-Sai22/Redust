@@ -193,7 +193,7 @@ pub async fn handle_xread<W: AsyncWriteExt + Unpin>(
     state: &Arc<AppState>,
     args: &[String],
 ) -> std::io::Result<()> {
-    let null = "$-1\r\n";
+    let null = "*-1\r\n";
     let (no_of_keys, start_idx, timeout_ms) = if args[0].to_lowercase() == "block" {
         let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
         (((args.len() - 3) / 2), 3, timeout_ms)

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tokio::io::AsyncWriteExt;
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use crate::storage::AppState;
 
@@ -73,7 +73,8 @@ pub async fn replicate_command(
     // Send to all replicas
     let mut replicas = state.replicas.lock().await;
     for replica in replicas.iter_mut() {
-        replica.stream.write_all(cmd_bytes).await?;
+        let mut stream = TcpStream::from_std(replica.stream.try_clone().unwrap()).unwrap();
+        stream.write_all(cmd_bytes).await?;
     }
     
     // Update master replication offset
