@@ -18,7 +18,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Initialize the shared database
     let (stream_notifier_tx, _) = broadcast::channel::<()>(16);
-    let replica_of = env::args().nth(4);
+
+    let replica_of = if env::args().any(|arg| arg == "--replicaof") {
+        let idx = env::args().position(|arg| arg == "--replicaof").unwrap();
+        if let Some(addr) = env::args().nth(idx + 1) {
+            Some(addr)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let dir = if env::args().any(|arg| arg == "--dir") {
+        let idx = env::args().position(|arg| arg == "--dir").unwrap();
+        if let Some(dir) = env::args().nth(idx + 1) {
+            Some(dir)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let dbfilename = if env::args().any(|arg| arg == "--dbfilename") {
+        let idx = env::args().position(|arg| arg == "--dbfilename").unwrap();
+        if let Some(filename) = env::args().nth(idx + 1) {
+            Some(filename)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     let state = Arc::new(AppState {
         db: Mutex::new(HashMap::new()),
@@ -29,6 +61,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         master_replication_offset: Mutex::new(0),
         replicas: Mutex::new(Vec::new()),
         slave_replication_offset: Mutex::new(0),
+        dir,
+        dbfilename,
+        subscribers: Mutex::new(HashMap::new()),
+        client_subscriptions: Mutex::new(HashMap::new()),
     });
 
     // Start the server

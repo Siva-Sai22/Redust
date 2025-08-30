@@ -38,13 +38,16 @@ pub struct AppState {
     pub master_replication_offset: Mutex<u64>,
     pub replicas: Mutex<Vec<ReplicaInfo>>,
     pub slave_replication_offset: Mutex<u64>,
+    pub dir: Option<String>,
+    pub dbfilename: Option<String>,
+    pub subscribers: Mutex<HashMap<String, Vec<oneshot::Sender<String>>>>,
+    pub client_subscriptions: Mutex<HashMap<String, Vec<String>>>,
 }
 
 pub struct TransactionState {
     pub in_transaction: bool,
     pub queued_commands: Vec<Vec<String>>,
 }
-
 
 pub type Db = Mutex<HashMap<String, ValueEntry>>;
 pub type BlockedClients = Mutex<HashMap<String, VecDeque<BlockedSender>>>;

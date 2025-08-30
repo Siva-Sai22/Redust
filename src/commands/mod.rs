@@ -4,6 +4,7 @@ pub mod stream;
 pub mod string;
 pub mod transaction;
 pub mod replication;
+pub mod pubsub;
 
 use crate::storage::{AppState, TransactionState};
 use std::sync::Arc;
@@ -15,6 +16,7 @@ pub async fn handle_command<W: AsyncWriteExt + Unpin>(
     stream: &mut W,
     state: &Arc<AppState>,
     transation_state: &mut TransactionState,
+    stream_id: String
 ) -> std::io::Result<()> {
     let command = parsed.get(0).unwrap().to_uppercase();
     let args = &parsed[1..];
@@ -51,6 +53,7 @@ pub async fn handle_command<W: AsyncWriteExt + Unpin>(
         "REPLCONF" => replication::handle_replconf(stream, state, args).await,
         "PSYNC" => replication::handle_psync(stream, state, args).await,
         "WAIT" => replication::handle_wait(stream, state, args).await,
+        "SUBSCRIBE" => pubsub::handle_subscribe(stream, state, args, stream_id).await,
         _ => {
             let err_msg = format!(
                 "-ERR unknown command `{}`, with args beginning with: {:?}\r\n",

@@ -9,9 +9,15 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
-    let port = match env::args().nth(2) {
-        Some(port) => port,
-        None => String::from("6379"),
+    let port = if env::args().any(|arg| arg == "--port") {
+        let idx = env::args().position(|arg| arg == "--port").unwrap();
+        if let Some(port) = env::args().nth(idx + 1) {
+            port
+        } else {
+            String::from("6379")
+        }
+    } else {
+        String::from("6379")
     };
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
@@ -130,11 +136,13 @@ async fn handle_stream(
                             }
                         }
                     } else {
+                        let stream_id = format!("{:?}", stream.peer_addr().unwrap());
                         match commands::handle_command(
                             parsed.clone(),
                             &mut stream,
                             &state,
                             &mut transation_state,
+                            stream_id
                         )
                         .await
                         {
@@ -201,21 +209,25 @@ async fn handle_master_stream(mut stream: TcpStream, state: Arc<AppState>, initi
 
                     let command_result = if parsed_command[0].to_uppercase() == "REPLCONF" {
                         // For REPLCONF, use the real stream to send the ACK back.
+                        let stream_id = format!("{:?}", stream.peer_addr().unwrap());
                         commands::handle_command(
                             parsed_command,
                             &mut stream,
                             &state,
                             &mut dummy_transaction_state,
+                            stream_id
                         )
                         .await
                     } else {
                         // For other commands (SET, etc.), use a dummy sink.
                         let mut sink = tokio::io::sink();
+                        let stream_id = String::from("");
                         commands::handle_command(
                             parsed_command,
                             &mut sink,
                             &state,
                             &mut dummy_transaction_state,
+                            stream_id
                         )
                         .await
                     };

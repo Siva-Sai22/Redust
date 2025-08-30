@@ -36,11 +36,13 @@ pub async fn handle_exec<W: AsyncWriteExt + Unpin>(
 
     for commands in queued_commands {
         let (mut reader, mut writer) = tokio::io::duplex(4096);
+        let stream_id = String::from("");
         let _ = Box::pin(handle_command(
             commands.to_vec(),
             &mut writer,
             state,
             transation_state,
+            stream_id
         ))
         .await;
 
